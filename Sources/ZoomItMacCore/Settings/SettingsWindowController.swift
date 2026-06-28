@@ -345,7 +345,7 @@ final class SettingsWindowController: NSObject {
 
             Shapes: hold Shift for a line, Control for a rectangle, Tab for an ellipse, or Shift+Control for an arrow while dragging.
 
-            Pen: change the width with the mouse wheel, the [ and ] keys, or Shift with the up and down arrow keys. Undo with ⌘Z and erase everything by pressing E.
+            Pen: change the width with the mouse wheel, the [ and ] keys, or Shift with the up and down arrow keys. Undo the last drawing with Ctrl+Z and erase everything by pressing E.
 
             Screen: press W or K to blank the screen white or black as a sketch pad.
             """,

@@ -276,7 +276,8 @@ final class ZoomCanvasView: NSView {
             } else {
                 handleVerticalArrow(up: false, shift: event.modifierFlags.contains(.shift))
             }
-        case 6 where event.modifierFlags.contains(.command):
+        case 6 where event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control):
+            // Ctrl+Z (matching Windows ZoomIt) or ⌘Z undoes the last gesture.
             commandSink(.undo)
         case 8 where event.modifierFlags.contains(.command):
             commandSink(.clear)
@@ -321,7 +322,9 @@ final class ZoomCanvasView: NSView {
         case "f": commandSink(.setTool(.pen))
         case "l": commandSink(.setTool(.line))
         case "a": commandSink(.setTool(.arrow))
-        case "e": commandSink(.setTool(.ellipse))
+        case "e":
+            // E erases all drawing, matching Windows ZoomIt.
+            commandSink(.clear)
         case "h": commandSink(.setTool(.highlighter))
         case "t":
             // T enters typing mode left-justified; Shift+T right-justified.
