@@ -214,6 +214,8 @@ public enum SelfTestRunner {
         settings.hotKeyModifiers = NSEvent.ModifierFlags([.command, .shift]).rawValue
         settings.drawHotKeyCode = 20
         settings.drawHotKeyModifiers = NSEvent.ModifierFlags([.control, .option]).rawValue
+        settings.liveHotKeyCode = 23
+        settings.liveHotKeyModifiers = NSEvent.ModifierFlags([.control, .shift]).rawValue
         store.save(settings)
 
         try expect(store.load() == settings, "Expected saved settings to round-trip through the store")

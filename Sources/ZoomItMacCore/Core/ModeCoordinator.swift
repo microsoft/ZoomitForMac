@@ -14,6 +14,12 @@ final class ModeCoordinator {
     private var isExiting = false
     /// The mode to restore when leaving typing mode (zoom vs. draw-without-zoom).
     private var modeBeforeTyping: AppMode = .staticZoom
+    /// The live screen-capture stream that feeds frames while in live zoom.
+    private var liveCaptureSession: LiveCaptureSession?
+    /// Invoked when live zoom starts/stops so global Control+Up/Down zoom
+    /// hotkeys can be registered only while live zoom is active.
+    var onBeginLiveZoomNavigation: (() -> Void)?
+    var onEndLiveZoomNavigation: (() -> Void)?
 
     init(
         settingsStore: SettingsStore,
@@ -36,9 +42,19 @@ final class ModeCoordinator {
     func handle(_ command: AppCommand) {
         switch command {
         case .activateStaticZoom:
-            activateStaticZoom()
+            if mode == .liveZoom {
+                toggleLiveZoomDrawing()
+            } else {
+                activateStaticZoom()
+            }
+        case .activateLiveZoom:
+            activateLiveZoom()
         case .activateDrawWithoutZoom:
-            activateDrawWithoutZoom()
+            if mode == .liveZoom {
+                toggleLiveZoomDrawing()
+            } else {
+                activateDrawWithoutZoom()
+            }
         case .zoomIn:
             zoomIn()
         case .zoomOutOrExit:
@@ -75,7 +91,7 @@ final class ModeCoordinator {
         case .decreaseFontSize:
             annotationController.decreaseFontSize()
             overlayController.requestRedraw()
-        case .activateLiveZoom, .captureStill, .startPanorama, .toggleRecording:
+        case .captureStill, .startPanorama, .toggleRecording:
             NSSound.beep()
         }
     }
@@ -129,6 +145,79 @@ final class ModeCoordinator {
         }
     }
 
+    private func activateLiveZoom() {
+        guard mode == .idle else {
+            animateExit()
+            return
+        }
+
+        let permissions = permissionService.currentState()
+        guard permissions.screenCapture.isGranted else {
+            permissionService.requestScreenCaptureAccess()
+            return
+        }
+
+        guard let display = displayManager.activeDisplay() else {
+            NSSound.beep()
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                // Capture one still frame for the initial display, then let the
+                // live stream keep refreshing the magnified content.
+                let frame = try await captureService.captureDisplay(display)
+                let settings = settingsStore.load()
+                viewportController.configure(for: frame, initialZoom: settings.defaultZoomFactor)
+                annotationController.reset()
+                annotationController.currentStyle.rootWidth = settings.rootPenWidth
+                annotationController.typingFontName = settings.typingFontName
+                annotationController.typingFontSize = settings.typingFontSize
+                if settings.animateZoom {
+                    viewportController.beginZoomInAnimation()
+                }
+                overlayController.show(
+                    frame: frame,
+                    viewportController: viewportController,
+                    annotationController: annotationController,
+                    smoothImage: settings.smoothImage,
+                    excludeFromScreenCapture: true,
+                    commandSink: { [weak self] command in self?.handle(command) }
+                )
+                mode = .liveZoom
+                overlayController.updateInteractionMode(.liveZoom)
+
+                // Start streaming live frames into the overlay. The session
+                // excludes our own app so the overlay is never captured back
+                // into itself.
+                let session = LiveCaptureSession { [weak self] image in
+                    guard let self, self.mode == .liveZoom || self.isExiting else { return }
+                    self.overlayController.updateLiveImage(image)
+                }
+                liveCaptureSession = session
+                try await session.start(display: display, excludingWindowNumber: overlayController.overlayWindowNumber)
+
+                // Enable Control+Up/Down zoom while live zoom is on screen.
+                onBeginLiveZoomNavigation?()
+
+                if settings.animateZoom {
+                    overlayController.runZoomAnimation()
+                }
+            } catch {
+                stopLiveCapture()
+                presentError(error)
+            }
+        }
+    }
+
+    /// While live zoomed, the draw/zoom hotkeys toggle drawing on the live view
+    /// without changing magnification or exiting. Annotations live in stable
+    /// screen-content coordinates, so the live image keeps updating beneath them.
+    private func toggleLiveZoomDrawing() {
+        guard mode == .liveZoom else { return }
+        overlayController.toggleDrawingMode()
+    }
+
     private func activateDrawWithoutZoom() {
         guard mode == .idle else {
             animateExit()
@@ -174,7 +263,7 @@ final class ModeCoordinator {
     }
 
     private func zoomIn() {
-        guard mode == .staticZoom || mode == .typing, !isExiting else { return }
+        guard mode == .staticZoom || mode == .liveZoom || mode == .typing, !isExiting else { return }
 
         let settings = settingsStore.load()
         let current = viewportController.targetZoomFactor
@@ -186,7 +275,7 @@ final class ModeCoordinator {
     }
 
     private func zoomOutOrExit() {
-        guard mode == .staticZoom || mode == .typing, !isExiting else { return }
+        guard mode == .staticZoom || mode == .liveZoom || mode == .typing, !isExiting else { return }
 
         let settings = settingsStore.load()
         let current = viewportController.targetZoomFactor
@@ -225,10 +314,19 @@ final class ModeCoordinator {
     }
 
     private func exitActiveMode() {
+        stopLiveCapture()
         overlayController.close()
         annotationController.reset()
         mode = .idle
         isExiting = false
+    }
+
+    /// Tears down the live capture stream, if any, when leaving live zoom.
+    private func stopLiveCapture() {
+        onEndLiveZoomNavigation?()
+        guard let session = liveCaptureSession else { return }
+        liveCaptureSession = nil
+        Task { await session.stop() }
     }
 
     private func presentError(_ error: Error) {

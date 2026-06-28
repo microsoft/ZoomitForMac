@@ -28,9 +28,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private enum HotKeyTarget {
         case zoom
         case draw
+        case live
     }
     private weak var hotKeyButton: NSButton?
     private weak var drawHotKeyButton: NSButton?
+    private weak var liveHotKeyButton: NSButton?
     private var hotKeyMonitor: Any?
     private var recordingTarget: HotKeyTarget?
 
@@ -59,6 +61,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         guard let window else { return }
         hotKeyButton?.title = zoomHotKeyDisplayString()
         drawHotKeyButton?.title = drawHotKeyDisplayString()
+        liveHotKeyButton?.title = liveHotKeyDisplayString()
         launchAtLoginCheckbox?.state = LaunchAtLogin.isEnabled ? .on : .off
         // Suspend the global hotkeys while the dialog is open so the user can
         // record a new shortcut without it firing; they resume on close.
@@ -208,7 +211,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         stack.alignment = .leading
         stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 24, right: 16)
         return stack
     }
 
@@ -265,7 +268,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func makeZoomTab() -> NSView {
         let help = makeLabel(
-            "After toggling ZoomIt you can zoom in and out with the mouse wheel or the up and down arrow keys, and pan by moving the mouse. Exit zoom mode with Escape or by pressing the right mouse button.",
+            "After toggling ZoomIt you can zoom in and out with the mouse wheel or Option+Up and Option+Down, and pan by moving the mouse. Exit zoom mode with Escape or by pressing the right mouse button.",
             wraps: true
         )
 
@@ -275,6 +278,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         hotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
         self.hotKeyButton = hotKeyButton
         let hotKeyRow = makeRow([makeLabel("Zoom toggle:"), hotKeyButton])
+
+        let liveHelp = makeLabel(
+            "Live zoom magnifies the live screen so motion and updates stay visible while zoomed. Use the same zoom and pan controls.",
+            wraps: true
+        )
+
+        let liveHotKeyButton = NSButton(title: liveHotKeyDisplayString(), target: self, action: #selector(toggleLiveHotKeyRecording(_:)))
+        liveHotKeyButton.bezelStyle = .rounded
+        liveHotKeyButton.setButtonType(.momentaryPushIn)
+        liveHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+        self.liveHotKeyButton = liveHotKeyButton
+        let liveHotKeyRow = makeRow([makeLabel("Live zoom toggle:"), liveHotKeyButton])
 
         let magHelp = makeLabel("Specify the initial level of magnification when zooming in:", wraps: true)
 
@@ -297,7 +312,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let smoothCheck = NSButton(checkboxWithTitle: "Smooth zoomed image", target: self, action: #selector(smoothImageChanged(_:)))
         smoothCheck.state = settings.smoothImage ? .on : .off
 
-        return makeColumn([help, hotKeyRow, magHelp, magRow, animateCheck, smoothCheck])
+        return makeColumn([help, hotKeyRow, liveHelp, liveHotKeyRow, magHelp, magRow, animateCheck, smoothCheck])
     }
 
     @objc private func zoomLevelChanged(_ sender: NSPopUpButton) {
@@ -325,6 +340,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func toggleDrawHotKeyRecording(_ sender: NSButton) {
         beginRecording(target: .draw, sender: sender)
+    }
+
+    @objc private func toggleLiveHotKeyRecording(_ sender: NSButton) {
+        beginRecording(target: .live, sender: sender)
     }
 
     private func beginRecording(target: HotKeyTarget, sender: NSButton) {
@@ -359,21 +378,30 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         switch recordingTarget {
         case .zoom:
-            // Reject a shortcut already assigned to the draw hotkey.
-            if newCode == settings.drawHotKeyCode && newModifiers == settings.drawHotKeyModifiers {
+            // Reject a shortcut already assigned to another ZoomIt hotkey.
+            if conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
+                conflictsWithLive(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
             settings.hotKeyCode = newCode
             settings.hotKeyModifiers = newModifiers
         case .draw:
-            // Reject a shortcut already assigned to the zoom hotkey.
-            if newCode == settings.hotKeyCode && newModifiers == settings.hotKeyModifiers {
+            if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
+                conflictsWithLive(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
             settings.drawHotKeyCode = newCode
             settings.drawHotKeyModifiers = newModifiers
+        case .live:
+            if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDraw(code: newCode, modifiers: newModifiers) {
+                NSSound.beep()
+                return nil
+            }
+            settings.liveHotKeyCode = newCode
+            settings.liveHotKeyModifiers = newModifiers
         case nil:
             return nil
         }
@@ -381,6 +409,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         finishRecording()
         onHotKeyChange()
         return nil
+    }
+
+    private func conflictsWithZoom(code: Int, modifiers: UInt) -> Bool {
+        code == settings.hotKeyCode && modifiers == settings.hotKeyModifiers
+    }
+
+    private func conflictsWithDraw(code: Int, modifiers: UInt) -> Bool {
+        code == settings.drawHotKeyCode && modifiers == settings.drawHotKeyModifiers
+    }
+
+    private func conflictsWithLive(code: Int, modifiers: UInt) -> Bool {
+        code == settings.liveHotKeyCode && modifiers == settings.liveHotKeyModifiers
     }
 
     private func finishRecording() {
@@ -391,6 +431,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         recordingTarget = nil
         hotKeyButton?.title = zoomHotKeyDisplayString()
         drawHotKeyButton?.title = drawHotKeyDisplayString()
+        liveHotKeyButton?.title = liveHotKeyDisplayString()
     }
 
     private func zoomHotKeyDisplayString() -> String {
@@ -399,6 +440,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func drawHotKeyDisplayString() -> String {
         Self.describe(keyCode: settings.drawHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.drawHotKeyModifiers))
+    }
+
+    private func liveHotKeyDisplayString() -> String {
+        Self.describe(keyCode: settings.liveHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.liveHotKeyModifiers))
     }
 
     // MARK: - Draw tab

@@ -34,6 +34,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Register Control+Up/Down zoom hotkeys only while live zoom is active.
+        modeCoordinator.onBeginLiveZoomNavigation = { [weak hotkeyService] in
+            hotkeyService?.beginLiveZoomNavigation()
+        }
+        modeCoordinator.onEndLiveZoomNavigation = { [weak hotkeyService] in
+            hotkeyService?.endLiveZoomNavigation()
+        }
+
         appController = AppController(
             settingsStore: settingsStore,
             permissionService: permissionService,
@@ -46,12 +54,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeStatusItem(controller: AppController) -> NSStatusItem {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "ZoomIt"
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        // Use the Windows ZoomIt icon (document with a magnifying glass) rendered
+        // as a black template image so it tints to match the menu bar, following
+        // the macOS convention for menu-bar icons.
+        if let button = item.button {
+            if let image = Self.menuBarIcon() {
+                button.image = image
+            } else {
+                button.title = "ZoomIt"
+            }
+        }
 
         let menu = NSMenu()
         let staticZoomItem = NSMenuItem(title: "Static Zoom", action: #selector(AppController.activateStaticZoom), keyEquivalent: "")
         menu.addItem(staticZoomItem)
+        let liveZoomItem = NSMenuItem(title: "Live Zoom", action: #selector(AppController.activateLiveZoom), keyEquivalent: "")
+        menu.addItem(liveZoomItem)
         menu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(AppController.showSettings), keyEquivalent: ",")
         menu.addItem(settingsItem)
@@ -65,5 +84,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         item.menu = menu
         return item
+    }
+
+    /// Loads the bundled black template version of the Windows ZoomIt icon and
+    /// sizes it for the menu bar. As a template image it is tinted by the system
+    /// (black on a light menu bar, white on a dark one).
+    private static func menuBarIcon() -> NSImage? {
+        guard let url = Bundle.module.url(forResource: "ZoomItIcon", withExtension: "png"),
+              let image = NSImage(contentsOf: url) else {
+            return nil
+        }
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = true
+        return image
     }
 }

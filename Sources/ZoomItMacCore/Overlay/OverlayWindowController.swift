@@ -24,6 +24,7 @@ final class OverlayWindowController {
         viewportController: ZoomViewportController,
         annotationController: AnnotationController,
         smoothImage: Bool,
+        excludeFromScreenCapture: Bool = false,
         commandSink: @escaping (AppCommand) -> Void
     ) {
         close()
@@ -40,6 +41,13 @@ final class OverlayWindowController {
         window.isOpaque = true
         window.acceptsMouseMovedEvents = true
         window.isReleasedWhenClosed = false
+        if excludeFromScreenCapture {
+            // Live zoom captures the screen live and displays it in this overlay.
+            // Marking the window as non-shareable keeps ScreenCaptureKit from
+            // capturing the overlay back into itself, which would otherwise feed
+            // the magnified output into the next frame and zoom in infinitely.
+            window.sharingType = .none
+        }
 
         let canvasView = ZoomCanvasView(
             frame: CGRect(origin: .zero, size: capturedFrame.display.frame.size),
@@ -104,6 +112,21 @@ final class OverlayWindowController {
         canvasView?.interactionMode = mode
         requestRedraw()
     }
+
+    /// Pushes a freshly captured live frame to the canvas during live zoom.
+    func updateLiveImage(_ image: CGImage) {
+        canvasView?.updateLiveImage(image)
+    }
+
+    /// Toggles drawing mode on the overlay (used by the draw hotkey while live
+    /// zoomed): arms drawing if idle, or leaves it if already drawing.
+    func toggleDrawingMode() {
+        canvasView?.toggleDrawingMode()
+    }
+
+    /// The overlay's window number, used to exclude it from live screen capture
+    /// so the magnified overlay is never captured back into itself.
+    var overlayWindowNumber: Int? { window?.windowNumber }
 
     func requestRedraw() {
         canvasView?.needsDisplay = true

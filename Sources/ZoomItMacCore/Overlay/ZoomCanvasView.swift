@@ -2,7 +2,7 @@ import AppKit
 
 @MainActor
 final class ZoomCanvasView: NSView {
-    private let capturedFrame: CapturedFrame
+    private var capturedFrame: CapturedFrame
     private let viewportController: ZoomViewportController
     private let annotationController: AnnotationController
     private let commandSink: (AppCommand) -> Void
@@ -15,6 +15,10 @@ final class ZoomCanvasView: NSView {
     /// shape (line/arrow/rectangle/ellipse) is being dragged out.
     private var activeStrokeTool: AnnotationTool?
     private var cursorHidden = false
+    /// While interactive live zoom is on, the overlay is click-through and a
+    /// global monitor tracks the real cursor so the magnified view follows it.
+    private var liveMouseMonitor: Any?
+    private var liveZoomClickThrough = false
     private var scrollZoomAccumulator: CGFloat = 0
     private let smoothImage: Bool
 
@@ -50,6 +54,7 @@ final class ZoomCanvasView: NSView {
             if leftTypingMode {
                 anchorCursorAfterTyping()
             }
+            updateLiveZoomInteractivity()
             needsDisplay = true
         }
     }
@@ -76,6 +81,27 @@ final class ZoomCanvasView: NSView {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    /// Replaces the displayed screen image with a freshly captured live frame.
+    /// Used by live zoom, where the magnified content keeps updating instead of
+    /// being a frozen snapshot. The display geometry is unchanged, so only the
+    /// pixels are swapped and a redraw is requested.
+    func updateLiveImage(_ image: CGImage) {
+        capturedFrame.image = image
+        needsDisplay = true
+    }
+
+    /// Toggles drawing mode from outside (e.g. the draw hotkey while live
+    /// zoomed): it arms drawing if idle, or leaves drawing mode if already on,
+    /// without changing magnification.
+    func toggleDrawingMode() {
+        if isDrawingMode {
+            exitDrawingMode()
+        } else {
+            enterDrawingMode()
+        }
+        needsDisplay = true
     }
 
     override var acceptsFirstResponder: Bool { true }
@@ -162,6 +188,11 @@ final class ZoomCanvasView: NSView {
         }
 
         guard isDrawingMode else {
+            // In live zoom, clicking must not enter drawing mode; the user
+            // explicitly enters it with the draw hotkey (Control+1/Control+2).
+            if interactionMode == .liveZoom {
+                return
+            }
             // The first press only arms drawing mode and shows the pen cursor;
             // it does not begin a stroke.
             enterDrawingMode()
@@ -272,9 +303,14 @@ final class ZoomCanvasView: NSView {
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 53:
-            // Esc leaves typing mode first (matching ZoomIt); otherwise exits.
+            // Esc leaves typing mode first (matching ZoomIt). In live-zoom
+            // drawing it leaves drawing mode but stays in live zoom; otherwise
+            // it exits the overlay.
             if interactionMode == .typing {
                 commandSink(.toggleTyping(rightAligned: false))
+            } else if interactionMode == .liveZoom && isDrawingMode {
+                exitDrawingMode()
+                needsDisplay = true
             } else {
                 commandSink(.exit)
             }
@@ -416,6 +452,7 @@ final class ZoomCanvasView: NSView {
         guard !isDrawingMode else { return }
         isDrawingMode = true
         isStroking = false
+        updateLiveZoomInteractivity()
     }
 
     private func exitDrawingMode() {
@@ -431,6 +468,7 @@ final class ZoomCanvasView: NSView {
         if let anchor = latestCursorLocation {
             warpCursor(toGlobal: anchor)
         }
+        updateLiveZoomInteractivity()
     }
 
     /// When typing mode ends, the hidden system cursor is wherever the user
@@ -485,6 +523,7 @@ final class ZoomCanvasView: NSView {
     }
 
     func prepareForClose() {
+        stopLiveMouseTracking()
         showSystemCursor()
     }
 
@@ -495,9 +534,67 @@ final class ZoomCanvasView: NSView {
         // separately in drawing mode.
         if window != nil {
             hideSystemCursor()
+            updateLiveZoomInteractivity()
         } else {
+            stopLiveMouseTracking()
             showSystemCursor()
         }
+    }
+
+    /// Live zoom is interactive (click-through, real cursor visible) whenever it
+    /// is not in drawing mode, letting the user keep using the system while the
+    /// magnified view follows the cursor. Drawing mode (and every other mode)
+    /// captures input modally as usual.
+    private var isInteractiveLiveZoom: Bool {
+        interactionMode == .liveZoom && !isDrawingMode
+    }
+
+    private func updateLiveZoomInteractivity() {
+        guard let window else { return }
+        let interactive = isInteractiveLiveZoom
+        guard interactive != liveZoomClickThrough else { return }
+        liveZoomClickThrough = interactive
+        if interactive {
+            // Pass mouse events through to the apps underneath and show the real
+            // cursor; a global monitor keeps the magnified view tracking it.
+            window.ignoresMouseEvents = true
+            showSystemCursor()
+            startLiveMouseTracking()
+        } else {
+            // Reclaim input so the overlay can draw/pan modally.
+            stopLiveMouseTracking()
+            window.ignoresMouseEvents = false
+            hideSystemCursor()
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(self)
+        }
+    }
+
+    private func startLiveMouseTracking() {
+        guard liveMouseMonitor == nil else { return }
+        liveMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handleGlobalMouseMove()
+            }
+        }
+    }
+
+    private func stopLiveMouseTracking() {
+        if let liveMouseMonitor {
+            NSEvent.removeMonitor(liveMouseMonitor)
+        }
+        liveMouseMonitor = nil
+    }
+
+    private func handleGlobalMouseMove() {
+        // Follow the real cursor so the magnified region recenters on it. The
+        // source-rect math anchors the point under the cursor to itself, so the
+        // content beneath the cursor stays aligned for accurate clicks.
+        latestCursorLocation = NSEvent.mouseLocation
+        needsDisplay = true
     }
 
     private func drawCursorIndicator(in context: CGContext, source: CGRect) {

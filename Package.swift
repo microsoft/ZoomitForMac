@@ -15,6 +15,9 @@ let package = Package(
         .target(
             name: "ZoomItMacCore",
             path: "Sources/ZoomItMacCore",
+            resources: [
+                .process("Resources")
+            ],
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency")
             ]

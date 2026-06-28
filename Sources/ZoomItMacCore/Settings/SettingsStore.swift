@@ -17,6 +17,10 @@ struct AppSettings: Equatable {
     /// zooming" hotkey.
     var drawHotKeyCode: Int
     var drawHotKeyModifiers: UInt
+    /// Virtual key code and modifier-flag raw value for the global "live zoom"
+    /// hotkey, which magnifies the live screen instead of a frozen snapshot.
+    var liveHotKeyCode: Int
+    var liveHotKeyModifiers: UInt
 
     /// Initial magnification levels offered on the Zoom settings tab, matching
     /// ZoomIt's g_ZoomLevels slider values.
@@ -36,7 +40,10 @@ struct AppSettings: Equatable {
         hotKeyModifiers: 1 << 18,
         // Control+2 (kVK_ANSI_2 = 19) toggles draw-without-zoom.
         drawHotKeyCode: 19,
-        drawHotKeyModifiers: 1 << 18
+        drawHotKeyModifiers: 1 << 18,
+        // Control+4 (kVK_ANSI_4 = 21) toggles live zoom.
+        liveHotKeyCode: 21,
+        liveHotKeyModifiers: 1 << 18
     )
 }
 
@@ -59,6 +66,8 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let hotKeyModifiers = "hotKeyModifiers"
         static let drawHotKeyCode = "drawHotKeyCode"
         static let drawHotKeyModifiers = "drawHotKeyModifiers"
+        static let liveHotKeyCode = "liveHotKeyCode"
+        static let liveHotKeyModifiers = "liveHotKeyModifiers"
     }
 
     private let defaults: UserDefaults
@@ -118,6 +127,14 @@ final class UserDefaultsSettingsStore: SettingsStore {
             settings.drawHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.drawHotKeyModifiers))
         }
 
+        if defaults.object(forKey: Key.liveHotKeyCode) != nil {
+            settings.liveHotKeyCode = defaults.integer(forKey: Key.liveHotKeyCode)
+        }
+
+        if defaults.object(forKey: Key.liveHotKeyModifiers) != nil {
+            settings.liveHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.liveHotKeyModifiers))
+        }
+
         return settings
     }
 
@@ -134,5 +151,7 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(Int(bitPattern: settings.hotKeyModifiers), forKey: Key.hotKeyModifiers)
         defaults.set(settings.drawHotKeyCode, forKey: Key.drawHotKeyCode)
         defaults.set(Int(bitPattern: settings.drawHotKeyModifiers), forKey: Key.drawHotKeyModifiers)
+        defaults.set(settings.liveHotKeyCode, forKey: Key.liveHotKeyCode)
+        defaults.set(Int(bitPattern: settings.liveHotKeyModifiers), forKey: Key.liveHotKeyModifiers)
     }
 }

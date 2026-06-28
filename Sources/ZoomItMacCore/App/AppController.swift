@@ -30,6 +30,10 @@ final class AppController: NSObject {
         modeCoordinator.handle(.activateStaticZoom)
     }
 
+    @objc func activateLiveZoom() {
+        modeCoordinator.handle(.activateLiveZoom)
+    }
+
     @objc func showSettings() {
         settingsWindowController.show()
     }

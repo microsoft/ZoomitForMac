@@ -1,18 +1,19 @@
 # ZoomItMac
 
-ZoomItMac is the initial implementation scaffold for a macOS utility modeled after Sysinternals ZoomIt. The first milestone focuses on static zoom over a frozen display image with drawing and typing annotations.
+ZoomItMac is a macOS utility modeled after Sysinternals ZoomIt. It provides static zoom over a frozen screen capture, interactive live zoom of the running screen, draw-without-zoom, on-screen drawing and typing annotations, and runs as a configurable menu-bar app.
 
 ## Current Status
 
-- Menu-bar app shell.
-- Static zoom command path.
+- Menu-bar app shell with the ZoomIt icon (a black template version of the Windows icon).
+- Static zoom over a frozen capture, and interactive live zoom of the running screen.
+- Draw-without-zoom mode that annotates the current screen at 1×.
 - Smooth telescoping zoom-in/zoom-out animations (ZoomIt's 1.1x/0.8x step model).
-- ScreenCaptureKit single-display capture abstraction.
-- AppKit full-screen overlay window.
-- Core Graphics canvas rendering.
-- Basic drawing tools: pen, line, rectangle, ellipse, arrow (with arrowhead), and highlighter.
-- Basic text annotations in typing mode.
-- Local and global key observation for `Command+Shift+1`.
+- ScreenCaptureKit single-display capture, plus a live capture stream for live zoom.
+- AppKit full-screen overlay window with Core Graphics canvas rendering.
+- Drawing tools: pen, line, rectangle, ellipse, arrow (with arrowhead), and highlighter, with undo and erase.
+- Text annotations in typing mode.
+- Configurable global hotkeys (Carbon `RegisterEventHotKey`): zoom (`Control+1`), draw-without-zoom (`Control+2`), and live zoom (`Control+4`).
+- Optional launch at login.
 
 ## Requirements
 
@@ -40,14 +41,14 @@ The self-test validates viewport zoom math, coordinate mapping, drawing annotati
 swift run ZoomIt
 ```
 
-The app appears as a menu-bar item titled `ZoomIt`. Press the global hotkey (default `Control+1`) or use the menu to start static zoom. The hotkey is configurable in Settings. The executable form is useful for development; a later packaging pass should produce a signed and notarized `.app` bundle.
+The app appears as a menu-bar item showing the ZoomIt icon. Press the global hotkey (default `Control+1`) or use the menu to start static zoom. Live zoom (default `Control+4`) magnifies the live screen instead of a frozen snapshot. The hotkeys are configurable in Settings. The executable form is useful for development; a later packaging pass should produce a signed and notarized `.app` bundle.
 
 ## Settings
 
 Open the **Settings…** item from the menu-bar menu (or `Command+,`) to configure ZoomIt. The window mirrors the Windows ZoomIt options dialog with tabbed panes, includes the same kind of descriptive help text on each tab, and shows a `Sysinternals ZoomIt` version/copyright footer. Changes are saved immediately to `UserDefaults`:
 
 - **General**: launch ZoomIt at login (requires the bundled `.app`; see Packaging).
-- **Zoom**: the global zoom-toggle hotkey (click the button and type a new shortcut), initial magnification level (`1.25×`–`4×`), animate zoom in/out, and smooth (interpolated) zoomed image.
+- **Zoom**: the global zoom-toggle hotkey (click the button and type a new shortcut), the live-zoom hotkey (default `Control+4`), initial magnification level (`1.25×`–`4×`), animate zoom in/out, and smooth (interpolated) zoomed image.
 - **Draw**: the global draw-without-zoom hotkey (default `Control+2`) and default pen width. The pen color is chosen dynamically while drawing (R/G/B/O/Y/P/W/K), so it is not a setting.
 - **Type**: typing-mode font (family and size) via the standard macOS font panel.
 
@@ -61,11 +62,22 @@ The default is `Control+1` — the closest analog to Windows ZoomIt's `Ctrl+1` t
 
 - `Esc`: exit overlay.
 - Left click: enter drawing mode (shows the pen cursor; does not draw).
-- `Up`: zoom in one level (snaps to 2×, then doubles up to 32×, matching Windows ZoomIt).
-- `Down`: zoom out one level (halves above 2×, then eases out to 1×); exits the overlay once at 1×.
+- `Option+Up`: zoom in one level (snaps to 2×, then doubles up to 32×, matching Windows ZoomIt).
+- `Option+Down`: zoom out one level (halves above 2×, then eases out to 1×); exits the overlay once at 1×.
 - `Shift+Up` / `Shift+Down`: increase/decrease pen width.
-- Mouse wheel: zoom in/out using the same steps as `Up` / `Down`.
+- Mouse wheel: zoom in/out using the same steps as `Option+Up` / `Option+Down`.
 - Moving the mouse pans the zoomed view. The system cursor stays hidden while the overlay is on screen.
+
+### Live zoom mode
+
+Live zoom (default `Control+4`) behaves like zoom mode but the magnified content keeps updating, so motion, video, and live UI stay visible while zoomed.
+
+- While not drawing, live zoom is **interactive**: the overlay is click-through and the real cursor stays visible, so you can keep using the system normally while the magnified view follows the cursor.
+- `Option+Up` / `Option+Down`: zoom in / out (registered globally while live zoom is active; `Control+Up/Down` can't be used because macOS reserves them for Mission Control / App Exposé).
+- `Control+1` or `Control+2`: toggle drawing mode on the live view without changing magnification. While drawing, the overlay captures input; `Control+1`/`Control+2` or `Esc` leaves drawing mode and returns to interactive live zoom. Annotations stay anchored in screen-content coordinates while the live image updates beneath them.
+- `Control+4` exits live zoom.
+
+Unlike Windows ZoomIt — which uses the system Magnification API — macOS exposes no equivalent third-party live-magnification API. ZoomItMac instead composites a live ScreenCaptureKit stream of the display into the overlay (with the overlay excluded from its own capture). Because the magnifier centers on the cursor (the point under the cursor maps to itself), clicks pass through to what is visually under the cursor; accuracy is best toward the center of the screen and degrades slightly near the edges where the zoom region clamps.
 
 ### Drawing mode
 
@@ -89,14 +101,13 @@ The default is `Control+1` — the closest analog to Windows ZoomIt's `Ctrl+1` t
 - `Command+Z`: undo last annotation.
 - `Command+C`: clear annotations.
 - `R/G/B/Y/O/P/W/K`: set red, green, blue, yellow, orange, pink, white, black (in drawing mode, `W`/`K` blank the screen instead — see above).
-- `F/L/A/E/H`: set freehand pen, line, arrow, ellipse, highlighter.
+- `F/L/A/H`: set freehand pen, line, arrow, highlighter.
+- `E`: erase all annotations.
 - `[` / `]`: decrease/increase pen width.
 
 ## Next Implementation Steps
 
-1. Replace global key observation with a real configurable global hotkey registration/event tap layer.
-2. Add precise screen-coordinate annotation anchoring so drawings stay stable across zoom and pan changes.
-3. Add arrowhead rendering and rectangle shortcut mapping.
-4. Add permission onboarding UI instead of alert-only prompting.
-5. Add tests for viewport math and display coordinate conversion.
-6. Add `.app` bundle packaging with privacy strings and hardened runtime signing settings.
+1. Add precise screen-coordinate annotation anchoring so drawings stay stable across zoom and pan changes.
+2. Add permission onboarding UI instead of alert-only prompting.
+3. Add multi-display selection and handling for live and static zoom.
+4. Add `.app` bundle packaging with privacy strings and hardened runtime signing settings (also required for launch at login to function).

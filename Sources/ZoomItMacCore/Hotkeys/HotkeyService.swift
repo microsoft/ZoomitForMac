@@ -7,6 +7,9 @@ final class HotkeyService {
     private let commandHandler: (AppCommand) -> Void
     private var hotKeyRef: EventHotKeyRef?
     private var drawHotKeyRef: EventHotKeyRef?
+    private var liveHotKeyRef: EventHotKeyRef?
+    private var zoomInNavRef: EventHotKeyRef?
+    private var zoomOutNavRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
 
     init(settingsStore: SettingsStore, commandHandler: @escaping (AppCommand) -> Void) {
@@ -27,10 +30,52 @@ final class HotkeyService {
 
     func stop() {
         unregisterHotKey()
+        endLiveZoomNavigation()
         if let eventHandlerRef {
             RemoveEventHandler(eventHandlerRef)
         }
         eventHandlerRef = nil
+    }
+
+    /// Registers Option+Up / Option+Down as global hotkeys for the duration of
+    /// live zoom so they zoom in and out. They are registered globally (rather
+    /// than handled by the overlay) so they fire even though the overlay is the
+    /// key window. Option+arrows is used instead of Control+arrows because macOS
+    /// reserves Control+Up/Down for Mission Control / App Exposé and will not
+    /// yield them to a registered hotkey.
+    func beginLiveZoomNavigation() {
+        installEventHandlerIfNeeded()
+        let target = GetApplicationEventTarget()
+        let signature = fourCharacterCode("ZITM")
+
+        endLiveZoomNavigation()
+        RegisterEventHotKey(
+            UInt32(kVK_UpArrow),
+            UInt32(optionKey),
+            EventHotKeyID(signature: signature, id: 4),
+            target,
+            0,
+            &zoomInNavRef
+        )
+        RegisterEventHotKey(
+            UInt32(kVK_DownArrow),
+            UInt32(optionKey),
+            EventHotKeyID(signature: signature, id: 5),
+            target,
+            0,
+            &zoomOutNavRef
+        )
+    }
+
+    func endLiveZoomNavigation() {
+        if let zoomInNavRef {
+            UnregisterEventHotKey(zoomInNavRef)
+        }
+        zoomInNavRef = nil
+        if let zoomOutNavRef {
+            UnregisterEventHotKey(zoomOutNavRef)
+        }
+        zoomOutNavRef = nil
     }
 
     private func installEventHandlerIfNeeded() {
@@ -63,6 +108,9 @@ final class HotkeyService {
                 switch hotKeyID.id {
                 case 1: command = .activateStaticZoom
                 case 2: command = .activateDrawWithoutZoom
+                case 3: command = .activateLiveZoom
+                case 4: command = .zoomIn
+                case 5: command = .zoomOutOrExit
                 default: return noErr
                 }
 
@@ -105,6 +153,16 @@ final class HotkeyService {
             0,
             &drawHotKeyRef
         )
+
+        let liveModifiers = NSEvent.ModifierFlags(rawValue: settings.liveHotKeyModifiers)
+        RegisterEventHotKey(
+            UInt32(settings.liveHotKeyCode),
+            carbonModifiers(from: liveModifiers),
+            EventHotKeyID(signature: signature, id: 3),
+            target,
+            0,
+            &liveHotKeyRef
+        )
     }
 
     private func unregisterHotKey() {
@@ -116,6 +174,10 @@ final class HotkeyService {
             UnregisterEventHotKey(drawHotKeyRef)
         }
         drawHotKeyRef = nil
+        if let liveHotKeyRef {
+            UnregisterEventHotKey(liveHotKeyRef)
+        }
+        liveHotKeyRef = nil
     }
 
     private func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
