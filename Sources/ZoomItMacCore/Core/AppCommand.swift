@@ -13,6 +13,7 @@ enum AppCommand: Equatable {
     case decreasePenWidth
     case undo
     case clear
+    case snipRegion(save: Bool)
     case captureStill
     case startPanorama
     case toggleRecording

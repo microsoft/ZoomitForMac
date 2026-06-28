@@ -16,6 +16,13 @@ final class ModeCoordinator {
     private var modeBeforeTyping: AppMode = .staticZoom
     /// The live screen-capture stream that feeds frames while in live zoom.
     private var liveCaptureSession: LiveCaptureSession?
+    /// Drives the region snip (Control+6 / Control+Shift+6).
+    private lazy var snipController = SnipController(
+        captureService: captureService,
+        displayManager: displayManager,
+        permissionService: permissionService
+    )
+    private var isSnipping = false
     /// Invoked when live zoom starts/stops so global Control+Up/Down zoom
     /// hotkeys can be registered only while live zoom is active.
     var onBeginLiveZoomNavigation: (() -> Void)?
@@ -40,6 +47,17 @@ final class ModeCoordinator {
     }
 
     func handle(_ command: AppCommand) {
+        if isSnipping {
+            // Ignore activation and snip hotkeys while a region selection is on
+            // screen so a second trigger can't stack overlays.
+            switch command {
+            case .activateStaticZoom, .activateLiveZoom, .activateDrawWithoutZoom, .snipRegion, .zoomIn, .zoomOutOrExit:
+                return
+            default:
+                break
+            }
+        }
+
         switch command {
         case .activateStaticZoom:
             if mode == .liveZoom {
@@ -67,6 +85,8 @@ final class ModeCoordinator {
         case .clear:
             annotationController.clear()
             overlayController.requestRedraw()
+        case .snipRegion(let save):
+            startSnip(save: save)
         case .setTool(let tool):
             annotationController.currentTool = tool
         case .setColor(let color):
@@ -319,6 +339,30 @@ final class ModeCoordinator {
         annotationController.reset()
         mode = .idle
         isExiting = false
+    }
+
+    /// Starts a region snip. From idle it captures the screen; while zoomed it
+    /// selects within the current viewport so ZoomIt's own overlay is reused
+    /// rather than captured.
+    private func startSnip(save: Bool) {
+        guard !isSnipping else {
+            NSSound.beep()
+            return
+        }
+        switch mode {
+        case .idle:
+            isSnipping = true
+            snipController.begin(save: save) { [weak self] in
+                self?.isSnipping = false
+            }
+        case .staticZoom, .liveZoom, .drawOnly, .typing:
+            isSnipping = true
+            overlayController.beginRegionSnip(save: save) { [weak self] in
+                self?.isSnipping = false
+            }
+        default:
+            NSSound.beep()
+        }
     }
 
     /// Tears down the live capture stream, if any, when leaving live zoom.

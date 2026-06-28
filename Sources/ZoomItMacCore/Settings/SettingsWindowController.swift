@@ -29,10 +29,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         case zoom
         case draw
         case live
+        case snip
     }
     private weak var hotKeyButton: NSButton?
     private weak var drawHotKeyButton: NSButton?
     private weak var liveHotKeyButton: NSButton?
+    private weak var snipHotKeyButton: NSButton?
     private var hotKeyMonitor: Any?
     private var recordingTarget: HotKeyTarget?
 
@@ -62,6 +64,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         hotKeyButton?.title = zoomHotKeyDisplayString()
         drawHotKeyButton?.title = drawHotKeyDisplayString()
         liveHotKeyButton?.title = liveHotKeyDisplayString()
+        snipHotKeyButton?.title = snipHotKeyDisplayString()
         launchAtLoginCheckbox?.state = LaunchAtLogin.isEnabled ? .on : .off
         // Suspend the global hotkeys while the dialog is open so the user can
         // record a new shortcut without it firing; they resume on close.
@@ -89,7 +92,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             ("General", makeGeneralTab()),
             ("Zoom", makeZoomTab()),
             ("Draw", makeDrawTab()),
-            ("Type", makeTypeTab())
+            ("Type", makeTypeTab()),
+            ("Snip", makeSnipTab())
         ]
 
         var maxContentHeight: CGFloat = 0
@@ -102,23 +106,43 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             widthConstraint.isActive = false
         }
 
+        // Add a little extra height beyond the tallest tab so even that tab
+        // (the Draw tab) keeps some breathing room below its content.
+        let tabContentHeight = maxContentHeight + 16
+
         let tabView = NSTabView()
         tabView.translatesAutoresizingMaskIntoConstraints = false
         for (label, content) in tabs {
-            // Pin the content to the top of a fixed-height holder so shorter
-            // tabs leave empty space at the bottom rather than centering.
+            // The holder is frame-managed so NSTabView resizes it to fill the
+            // content area; the content is pinned to the holder's top so every
+            // tab shares the same top margin regardless of window position.
             let holder = NSView()
-            holder.translatesAutoresizingMaskIntoConstraints = false
+            holder.translatesAutoresizingMaskIntoConstraints = true
+            holder.autoresizingMask = [.width, .height]
+            holder.frame = NSRect(x: 0, y: 0, width: contentWidth, height: tabContentHeight)
             content.translatesAutoresizingMaskIntoConstraints = false
             holder.addSubview(content)
             NSLayoutConstraint.activate([
                 content.topAnchor.constraint(equalTo: holder.topAnchor),
                 content.leadingAnchor.constraint(equalTo: holder.leadingAnchor),
-                content.trailingAnchor.constraint(equalTo: holder.trailingAnchor),
-                holder.heightAnchor.constraint(equalToConstant: maxContentHeight)
+                content.trailingAnchor.constraint(equalTo: holder.trailingAnchor)
             ])
             tabView.addTabViewItem(makeTabItem(label: label, view: holder))
         }
+
+        // Fix the tab view's size so its content area is exactly
+        // contentWidth × tabContentHeight on every tab. The chrome (tab strip and
+        // borders) is measured from a probe frame.
+        tabView.frame = NSRect(x: 0, y: 0, width: contentWidth + 24, height: tabContentHeight + 60)
+        tabView.layoutSubtreeIfNeeded()
+        let measuredChromeWidth = tabView.frame.width - tabView.contentRect.width
+        let measuredChromeHeight = tabView.frame.height - tabView.contentRect.height
+        let chromeWidth = measuredChromeWidth > 0 ? measuredChromeWidth : 14
+        let chromeHeight = measuredChromeHeight > 4 ? measuredChromeHeight : 34
+        NSLayoutConstraint.activate([
+            tabView.widthAnchor.constraint(equalToConstant: contentWidth + chromeWidth),
+            tabView.heightAnchor.constraint(equalToConstant: tabContentHeight + chromeHeight)
+        ])
 
         let outer = NSStackView(views: [tabView, makeFooter()])
         outer.orientation = .vertical
@@ -142,7 +166,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "ZoomIt Settings"
+        window.title = "ZoomIt - Sysinternals: www.sysinternals.com"
         window.contentView = container
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -346,6 +370,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         beginRecording(target: .live, sender: sender)
     }
 
+    @objc private func toggleSnipHotKeyRecording(_ sender: NSButton) {
+        beginRecording(target: .snip, sender: sender)
+    }
+
     private func beginRecording(target: HotKeyTarget, sender: NSButton) {
         if recordingTarget != nil {
             // A recording is already in progress; clicking any recorder stops it.
@@ -402,6 +430,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             }
             settings.liveHotKeyCode = newCode
             settings.liveHotKeyModifiers = newModifiers
+        case .snip:
+            if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
+                conflictsWithLive(code: newCode, modifiers: newModifiers) {
+                NSSound.beep()
+                return nil
+            }
+            settings.snipHotKeyCode = newCode
+            settings.snipHotKeyModifiers = newModifiers
         case nil:
             return nil
         }
@@ -432,6 +469,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         hotKeyButton?.title = zoomHotKeyDisplayString()
         drawHotKeyButton?.title = drawHotKeyDisplayString()
         liveHotKeyButton?.title = liveHotKeyDisplayString()
+        snipHotKeyButton?.title = snipHotKeyDisplayString()
     }
 
     private func zoomHotKeyDisplayString() -> String {
@@ -444,6 +482,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func liveHotKeyDisplayString() -> String {
         Self.describe(keyCode: settings.liveHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.liveHotKeyModifiers))
+    }
+
+    private func snipHotKeyDisplayString() -> String {
+        Self.describe(keyCode: settings.snipHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.snipHotKeyModifiers))
     }
 
     // MARK: - Draw tab
@@ -512,6 +554,30 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let fontRow = makeRow([makeLabel("Typing font:"), fontButton])
 
         return makeColumn([help, fontRow, sample])
+    }
+
+    // MARK: - Snip tab
+
+    private func makeSnipTab() -> NSView {
+        let help = makeLabel(
+            """
+            While zoomed, press Command+S to save the entire viewport to a file or Command+C to copy it to the clipboard.
+
+            To capture part of the screen at any time, press the snip shortcut and drag a rectangle. Releasing the drag copies the selected region to the clipboard. Hold Shift with the shortcut to save the region to a file instead. Press Escape to cancel.
+
+            Saved images are PNG files named with the current date and time.
+            """,
+            wraps: true
+        )
+
+        let snipHotKeyButton = NSButton(title: snipHotKeyDisplayString(), target: self, action: #selector(toggleSnipHotKeyRecording(_:)))
+        snipHotKeyButton.bezelStyle = .rounded
+        snipHotKeyButton.setButtonType(.momentaryPushIn)
+        snipHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+        self.snipHotKeyButton = snipHotKeyButton
+        let snipHotKeyRow = makeRow([makeLabel("Snip region:"), snipHotKeyButton])
+
+        return makeColumn([help, snipHotKeyRow])
     }
 
     private func currentTypingFont() -> NSFont {

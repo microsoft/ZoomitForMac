@@ -21,6 +21,11 @@ struct AppSettings: Equatable {
     /// hotkey, which magnifies the live screen instead of a frozen snapshot.
     var liveHotKeyCode: Int
     var liveHotKeyModifiers: UInt
+    /// Virtual key code and modifier-flag raw value for the global region snip
+    /// hotkey. The base shortcut copies the selected region to the clipboard;
+    /// the same shortcut with Shift toggled saves it to a file instead.
+    var snipHotKeyCode: Int
+    var snipHotKeyModifiers: UInt
 
     /// Initial magnification levels offered on the Zoom settings tab, matching
     /// ZoomIt's g_ZoomLevels slider values.
@@ -43,7 +48,11 @@ struct AppSettings: Equatable {
         drawHotKeyModifiers: 1 << 18,
         // Control+4 (kVK_ANSI_4 = 21) toggles live zoom.
         liveHotKeyCode: 21,
-        liveHotKeyModifiers: 1 << 18
+        liveHotKeyModifiers: 1 << 18,
+        // Control+6 (kVK_ANSI_6 = 22) snips a region to the clipboard;
+        // Control+Shift+6 snips a region to a file.
+        snipHotKeyCode: 22,
+        snipHotKeyModifiers: 1 << 18
     )
 }
 
@@ -68,6 +77,8 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let drawHotKeyModifiers = "drawHotKeyModifiers"
         static let liveHotKeyCode = "liveHotKeyCode"
         static let liveHotKeyModifiers = "liveHotKeyModifiers"
+        static let snipHotKeyCode = "snipHotKeyCode"
+        static let snipHotKeyModifiers = "snipHotKeyModifiers"
     }
 
     private let defaults: UserDefaults
@@ -135,6 +146,14 @@ final class UserDefaultsSettingsStore: SettingsStore {
             settings.liveHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.liveHotKeyModifiers))
         }
 
+        if defaults.object(forKey: Key.snipHotKeyCode) != nil {
+            settings.snipHotKeyCode = defaults.integer(forKey: Key.snipHotKeyCode)
+        }
+
+        if defaults.object(forKey: Key.snipHotKeyModifiers) != nil {
+            settings.snipHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.snipHotKeyModifiers))
+        }
+
         return settings
     }
 
@@ -153,5 +172,7 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(Int(bitPattern: settings.drawHotKeyModifiers), forKey: Key.drawHotKeyModifiers)
         defaults.set(settings.liveHotKeyCode, forKey: Key.liveHotKeyCode)
         defaults.set(Int(bitPattern: settings.liveHotKeyModifiers), forKey: Key.liveHotKeyModifiers)
+        defaults.set(settings.snipHotKeyCode, forKey: Key.snipHotKeyCode)
+        defaults.set(Int(bitPattern: settings.snipHotKeyModifiers), forKey: Key.snipHotKeyModifiers)
     }
 }

@@ -19,6 +19,14 @@ final class ZoomCanvasView: NSView {
     /// global monitor tracks the real cursor so the magnified view follows it.
     private var liveMouseMonitor: Any?
     private var liveZoomClickThrough = false
+    /// Region-snip state: while active, a drag selects a rectangle of the
+    /// current viewport to copy or save.
+    private var isSelectingRegion = false
+    private var regionSaveToFile = false
+    private var regionAnchor: CGPoint?
+    private var regionRect: CGRect = .zero
+    private var regionCursorPushed = false
+    private var onRegionSnipFinished: (() -> Void)?
     private var scrollZoomAccumulator: CGFloat = 0
     private let smoothImage: Bool
 
@@ -150,6 +158,10 @@ final class ZoomCanvasView: NSView {
         if isDrawingMode && !isDrawingShapeStroke {
             drawCursorIndicator(in: context, source: source)
         }
+
+        if isSelectingRegion {
+            drawRegionSelection(in: context)
+        }
     }
 
     /// True while the user is actively dragging out a shape, where the pen dot
@@ -181,6 +193,13 @@ final class ZoomCanvasView: NSView {
     override func mouseDown(with event: NSEvent) {
         pointerViewPoint = convert(event.locationInWindow, from: nil)
 
+        if isSelectingRegion {
+            regionAnchor = pointerViewPoint
+            regionRect = .zero
+            needsDisplay = true
+            return
+        }
+
         if interactionMode == .typing {
             annotationController.setInsertionPoint(contentPoint(for: event))
             needsDisplay = true
@@ -211,6 +230,11 @@ final class ZoomCanvasView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         pointerViewPoint = convert(event.locationInWindow, from: nil)
+        if isSelectingRegion {
+            updateRegionRect(to: pointerViewPoint)
+            needsDisplay = true
+            return
+        }
         if isDrawingMode && isStroking {
             annotationController.update(at: contentPoint(for: event))
         }
@@ -219,6 +243,10 @@ final class ZoomCanvasView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         pointerViewPoint = convert(event.locationInWindow, from: nil)
+        if isSelectingRegion {
+            finishRegionSnip()
+            return
+        }
         if isDrawingMode && isStroking {
             annotationController.end(at: contentPoint(for: event))
             isStroking = false
@@ -301,6 +329,13 @@ final class ZoomCanvasView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if isSelectingRegion {
+            // Only Escape (cancel) is honoured while selecting a snip region.
+            if event.keyCode == 53 {
+                cancelRegionSnip()
+            }
+            return
+        }
         switch event.keyCode {
         case 53:
             // Esc leaves typing mode first (matching ZoomIt). In live-zoom
@@ -335,10 +370,20 @@ final class ZoomCanvasView: NSView {
         case 6 where event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control):
             // Ctrl+Z (matching Windows ZoomIt) or ⌘Z undoes the last gesture.
             commandSink(.undo)
+        case 1 where event.modifierFlags.contains(.command):
+            // ⌘S saves the whole zoomed viewport (matching ZoomIt's Ctrl+S).
+            saveViewport()
         case 8 where event.modifierFlags.contains(.command):
-            commandSink(.clear)
+            // ⌘C copies the whole zoomed viewport (matching ZoomIt's Ctrl+C).
+            copyViewport()
         case 51 where interactionMode == .typing, 117 where interactionMode == .typing:
             annotationController.deleteBackward()
+            needsDisplay = true
+        case 36 where interactionMode == .typing, 76 where interactionMode == .typing:
+            // Return / Enter starts a new line. The caret drops to the next line
+            // left-aligned with the start of the text (right edge for
+            // right-aligned typing), matching standard multi-line text entry.
+            annotationController.insertText("\n")
             needsDisplay = true
         default:
             if interactionMode == .typing, let characters = event.characters, !characters.isEmpty {
@@ -546,7 +591,7 @@ final class ZoomCanvasView: NSView {
     /// magnified view follows the cursor. Drawing mode (and every other mode)
     /// captures input modally as usual.
     private var isInteractiveLiveZoom: Bool {
-        interactionMode == .liveZoom && !isDrawingMode
+        interactionMode == .liveZoom && !isDrawingMode && !isSelectingRegion
     }
 
     private func updateLiveZoomInteractivity() {
@@ -595,6 +640,146 @@ final class ZoomCanvasView: NSView {
         // content beneath the cursor stays aligned for accurate clicks.
         latestCursorLocation = NSEvent.mouseLocation
         needsDisplay = true
+    }
+
+    /// Renders the current viewport (magnified image plus annotations) to a
+    /// bitmap and copies it to the clipboard.
+    private func copyViewport() {
+        guard let image = captureViewportImage() else { return }
+        ImageExporter.copyToPasteboard(image)
+    }
+
+    /// Renders the current viewport and presents a Save dialog to write it as
+    /// PNG.
+    private func saveViewport() {
+        guard let image = captureViewportImage() else { return }
+        presentSavePanelOverOverlay(image)
+    }
+
+    /// Presents a Save dialog above the overlay (whose `.screenSaver` level would
+    /// otherwise hide it) with the cursor visible, then restores both.
+    private func presentSavePanelOverOverlay(_ image: CGImage) {
+        let savedLevel = window?.level
+        let wasCursorHidden = cursorHidden
+        window?.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue - 1)
+        if wasCursorHidden { showSystemCursor() }
+        ImageExporter.presentSavePanel(for: image)
+        if let savedLevel { window?.level = savedLevel }
+        if wasCursorHidden { hideSystemCursor() }
+    }
+
+    /// Snapshots exactly what the overlay is displaying (magnified image plus
+    /// annotations) at the view's backing resolution.
+    private func captureViewportImage() -> CGImage? {
+        guard let rep = bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
+        cacheDisplay(in: bounds, to: rep)
+        return rep.cgImage
+    }
+
+    // MARK: - Region snip
+
+    /// Begins selecting a rectangle of the current viewport to copy or save.
+    func beginRegionSnip(save: Bool, onFinished: @escaping () -> Void) {
+        regionSaveToFile = save
+        onRegionSnipFinished = onFinished
+        regionAnchor = nil
+        regionRect = .zero
+        isSelectingRegion = true
+        // In live zoom this drops click-through so the canvas captures the drag.
+        if interactionMode == .liveZoom {
+            updateLiveZoomInteractivity()
+        }
+        showSystemCursor()
+        pushRegionCursor()
+        needsDisplay = true
+    }
+
+    private func updateRegionRect(to point: CGPoint) {
+        guard let anchor = regionAnchor else { return }
+        regionRect = CGRect(
+            x: min(anchor.x, point.x),
+            y: min(anchor.y, point.y),
+            width: abs(point.x - anchor.x),
+            height: abs(point.y - anchor.y)
+        )
+    }
+
+    private func finishRegionSnip() {
+        let rect = regionRect
+        let save = regionSaveToFile
+        isSelectingRegion = false
+        regionRect = .zero
+        regionAnchor = nil
+        popRegionCursor()
+
+        if rect.width >= 3, rect.height >= 3, let full = captureViewportImage() {
+            let scale = window?.backingScaleFactor ?? capturedFrame.display.scaleFactor
+            let pixelRect = CGRect(
+                x: rect.minX * scale,
+                y: rect.minY * scale,
+                width: rect.width * scale,
+                height: rect.height * scale
+            ).integral
+            if let cropped = full.cropping(to: pixelRect) {
+                if save {
+                    presentSavePanelOverOverlay(cropped)
+                } else {
+                    ImageExporter.copyToPasteboard(cropped)
+                }
+            }
+        }
+        endRegionSnip()
+    }
+
+    private func cancelRegionSnip() {
+        isSelectingRegion = false
+        regionRect = .zero
+        regionAnchor = nil
+        popRegionCursor()
+        endRegionSnip()
+    }
+
+    private func endRegionSnip() {
+        needsDisplay = true
+        if interactionMode == .liveZoom {
+            updateLiveZoomInteractivity()
+        } else {
+            hideSystemCursor()
+        }
+        let callback = onRegionSnipFinished
+        onRegionSnipFinished = nil
+        callback?()
+    }
+
+    private func pushRegionCursor() {
+        guard !regionCursorPushed else { return }
+        NSCursor.crosshair.push()
+        regionCursorPushed = true
+    }
+
+    private func popRegionCursor() {
+        guard regionCursorPushed else { return }
+        NSCursor.pop()
+        regionCursorPushed = false
+    }
+
+    private func drawRegionSelection(in context: CGContext) {
+        let dim = NSColor(white: 0, alpha: 0.45).cgColor
+        context.setFillColor(dim)
+        guard regionRect.width > 0, regionRect.height > 0 else {
+            context.fill(bounds)
+            return
+        }
+        // Dim everything except the selected region (four surrounding rects).
+        let b = bounds
+        context.fill(CGRect(x: 0, y: 0, width: b.width, height: regionRect.minY))
+        context.fill(CGRect(x: 0, y: regionRect.maxY, width: b.width, height: b.height - regionRect.maxY))
+        context.fill(CGRect(x: 0, y: regionRect.minY, width: regionRect.minX, height: regionRect.height))
+        context.fill(CGRect(x: regionRect.maxX, y: regionRect.minY, width: b.width - regionRect.maxX, height: regionRect.height))
+
+        context.setStrokeColor(NSColor.white.cgColor)
+        context.setLineWidth(1)
+        context.stroke(regionRect.insetBy(dx: 0.5, dy: 0.5))
     }
 
     private func drawCursorIndicator(in context: CGContext, source: CGRect) {

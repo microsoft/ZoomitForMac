@@ -13,6 +13,7 @@ ZoomItMac is a macOS utility modeled after Sysinternals ZoomIt. It provides stat
 - Drawing tools: pen, line, rectangle, ellipse, arrow (with arrowhead), and highlighter, with undo and erase.
 - Text annotations in typing mode.
 - Configurable global hotkeys (Carbon `RegisterEventHotKey`): zoom (`Control+1`), draw-without-zoom (`Control+2`), and live zoom (`Control+4`).
+- Screenshot save/copy of the zoomed viewport (`Command+S` / `Command+C`) and a region snip (`Control+6` / `Control+Shift+6`) to the clipboard or a file.
 - Optional launch at login.
 
 ## Requirements
@@ -51,6 +52,7 @@ Open the **Settings…** item from the menu-bar menu (or `Command+,`) to configu
 - **Zoom**: the global zoom-toggle hotkey (click the button and type a new shortcut), the live-zoom hotkey (default `Control+4`), initial magnification level (`1.25×`–`4×`), animate zoom in/out, and smooth (interpolated) zoomed image.
 - **Draw**: the global draw-without-zoom hotkey (default `Control+2`) and default pen width. The pen color is chosen dynamically while drawing (R/G/B/O/Y/P/W/K), so it is not a setting.
 - **Type**: typing-mode font (family and size) via the standard macOS font panel.
+- **Snip**: the global region-snip hotkey (default `Control+6`), and a description of the save/copy shortcuts.
 
 ### Choosing a hotkey
 
@@ -66,6 +68,8 @@ The default is `Control+1` — the closest analog to Windows ZoomIt's `Ctrl+1` t
 - `Option+Down`: zoom out one level (halves above 2×, then eases out to 1×); exits the overlay once at 1×.
 - `Shift+Up` / `Shift+Down`: increase/decrease pen width.
 - Mouse wheel: zoom in/out using the same steps as `Option+Up` / `Option+Down`.
+- `Command+S`: save the entire viewport to a PNG file (Save dialog).
+- `Command+C`: copy the entire viewport to the clipboard.
 - Moving the mouse pans the zoomed view. The system cursor stays hidden while the overlay is on screen.
 
 ### Live zoom mode
@@ -99,11 +103,16 @@ Unlike Windows ZoomIt — which uses the system Magnification API — macOS expo
 - `T`: enter typing mode (`Shift+T` enters right-justified). Type to place text; `Esc` leaves typing mode.
 - In typing mode, `Up` / `Down` grow/shrink the font size.
 - `Command+Z`: undo last annotation.
-- `Command+C`: clear annotations.
+- `E`: erase all annotations.
 - `R/G/B/Y/O/P/W/K`: set red, green, blue, yellow, orange, pink, white, black (in drawing mode, `W`/`K` blank the screen instead — see above).
 - `F/L/A/H`: set freehand pen, line, arrow, highlighter.
-- `E`: erase all annotations.
 - `[` / `]`: decrease/increase pen width.
+
+## Screenshots and Snip
+
+- While zoomed, `Command+S` saves the entire viewport to a PNG file and `Command+C` copies it to the clipboard.
+- The region snip works any time (default `Control+6`): press the shortcut, then drag a rectangle over the screen. Releasing the drag copies the selected region to the clipboard; holding `Shift` with the shortcut (`Control+Shift+6`) saves it to a PNG file instead. `Esc` cancels.
+- Saved images are PNG files named `ZoomIt YYYY-MM-DD HHMMSS.png`. The snip hotkey is configurable on the Settings **Snip** tab.
 
 ## Next Implementation Steps
 
