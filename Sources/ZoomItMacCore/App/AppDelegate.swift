@@ -50,10 +50,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.title = "ZoomIt"
 
         let menu = NSMenu()
-        let staticZoomItem = NSMenuItem(title: "Static Zoom", action: #selector(AppController.activateStaticZoom), keyEquivalent: "1")
-        staticZoomItem.keyEquivalentModifierMask = [.command, .shift]
+        let staticZoomItem = NSMenuItem(title: "Static Zoom", action: #selector(AppController.activateStaticZoom), keyEquivalent: "")
         menu.addItem(staticZoomItem)
-        menu.addItem(NSMenuItem(title: "Check Permissions", action: #selector(AppController.checkPermissions), keyEquivalent: ","))
+        menu.addItem(.separator())
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(AppController.showSettings), keyEquivalent: ",")
+        menu.addItem(settingsItem)
+        menu.addItem(NSMenuItem(title: "Check Permissions", action: #selector(AppController.checkPermissions), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(AppController.quit), keyEquivalent: "q"))
 

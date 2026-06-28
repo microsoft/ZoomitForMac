@@ -10,7 +10,7 @@ enum AnnotationTool: Equatable {
     case highlighter
 }
 
-enum AnnotationColor: Equatable {
+enum AnnotationColor: String, CaseIterable, Equatable {
     case red
     case green
     case blue
@@ -32,6 +32,19 @@ enum AnnotationColor: Equatable {
         case .black: .black
         }
     }
+
+    var displayName: String {
+        switch self {
+        case .red: "Red"
+        case .green: "Green"
+        case .blue: "Blue"
+        case .yellow: "Yellow"
+        case .orange: "Orange"
+        case .pink: "Pink"
+        case .white: "White"
+        case .black: "Black"
+        }
+    }
 }
 
 struct AnnotationStyle: Equatable {
@@ -47,4 +60,7 @@ struct Annotation: Equatable {
     var points: [CGPoint]
     var style: AnnotationStyle
     var text: String = ""
+    var fontSize: CGFloat = 36
+    var fontName: String = ""
+    var rightAligned: Bool = false
 }

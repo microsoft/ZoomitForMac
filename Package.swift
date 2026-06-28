@@ -8,7 +8,7 @@ let package = Package(
     ],
     products: [
         .library(name: "ZoomItMacCore", targets: ["ZoomItMacCore"]),
-        .executable(name: "ZoomItMac", targets: ["ZoomItMac"]),
+        .executable(name: "ZoomIt", targets: ["ZoomIt"]),
         .executable(name: "ZoomItMacSelfTest", targets: ["ZoomItMacSelfTest"])
     ],
     targets: [
@@ -20,7 +20,7 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "ZoomItMac",
+            name: "ZoomIt",
             dependencies: ["ZoomItMacCore"],
             path: "Sources/ZoomItMacApp",
             swiftSettings: [

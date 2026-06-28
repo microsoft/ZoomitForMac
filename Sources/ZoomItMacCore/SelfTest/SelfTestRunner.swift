@@ -14,6 +14,7 @@ enum SelfTestError: Error, CustomStringConvertible {
 public enum SelfTestRunner {
     public static func run() throws {
         try testViewportClampsZoom()
+        try testViewportZoomAnimation()
         try testViewportSourceRect()
         try testViewportContentPointMapping()
         try testViewportContentToDestinationTransform()
@@ -22,6 +23,7 @@ public enum SelfTestRunner {
         try testUndoAndClear()
         try testTypingAnnotations()
         try testAnnotationRenderingTouchesPixels()
+        try testSettingsRoundTrip()
     }
 
     private static func testViewportClampsZoom() throws {
@@ -32,6 +34,32 @@ public enum SelfTestRunner {
 
         controller.configure(for: try makeFrame(), initialZoom: 0.25)
         try expect(controller.zoomFactor == 1, "Expected initial zoom to clamp to 1x")
+    }
+
+    private static func testViewportZoomAnimation() throws {
+        let controller = ZoomViewportController()
+        controller.configure(for: try makeFrame(), initialZoom: 2)
+
+        controller.beginZoomInAnimation()
+        try expect(controller.zoomFactor == 1, "Expected telescope to start at 1x")
+        try expect(controller.isAnimatingZoom, "Expected zoom-in to be animating")
+
+        var steps = 0
+        while controller.advanceZoomAnimation() {
+            steps += 1
+            try expect(steps < 1000, "Zoom-in animation did not converge")
+        }
+        try expect(controller.zoomFactor == 2, "Expected telescope to reach 2x, got \(controller.zoomFactor)")
+        try expect(!controller.isAnimatingZoom, "Expected animation to stop at target")
+
+        controller.animateZoom(to: 1)
+        try expect(controller.isAnimatingZoom, "Expected zoom-out to be animating")
+        steps = 0
+        while controller.advanceZoomAnimation() {
+            steps += 1
+            try expect(steps < 1000, "Zoom-out animation did not converge")
+        }
+        try expect(controller.zoomFactor == 1, "Expected telescope to reach 1x, got \(controller.zoomFactor)")
     }
 
     private static func testViewportSourceRect() throws {
@@ -163,6 +191,34 @@ public enum SelfTestRunner {
         }
 
         try expect(touchedPixel, "Expected annotation rendering to modify offscreen bitmap pixels")
+    }
+
+    private static func testSettingsRoundTrip() throws {
+        let suiteName = "ZoomItMacSelfTest.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            throw SelfTestError.failure("Could not create test UserDefaults suite")
+        }
+        let store = UserDefaultsSettingsStore(defaults: defaults)
+
+        // An unset store returns the documented options-dialog defaults.
+        try expect(store.load() == AppSettings.defaults, "Expected unset store to return default settings")
+
+        var settings = AppSettings.defaults
+        settings.defaultZoomFactor = 4
+        settings.animateZoom = false
+        settings.smoothImage = false
+        settings.rootPenWidth = 12
+        settings.typingFontName = "Helvetica"
+        settings.typingFontSize = 48
+        settings.hotKeyCode = 19
+        settings.hotKeyModifiers = NSEvent.ModifierFlags([.command, .shift]).rawValue
+        settings.drawHotKeyCode = 20
+        settings.drawHotKeyModifiers = NSEvent.ModifierFlags([.control, .option]).rawValue
+        store.save(settings)
+
+        try expect(store.load() == settings, "Expected saved settings to round-trip through the store")
+
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     private static func makeFrame() throws -> CapturedFrame {

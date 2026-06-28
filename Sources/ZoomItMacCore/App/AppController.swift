@@ -6,6 +6,10 @@ final class AppController: NSObject {
     private let permissionService: PermissionService
     private let hotkeyService: HotkeyService
     private let modeCoordinator: ModeCoordinator
+    private lazy var settingsWindowController = SettingsWindowController(
+        settingsStore: settingsStore,
+        onHotKeyChange: { [weak self] in self?.hotkeyService.reloadHotkey() }
+    )
 
     init(
         settingsStore: SettingsStore,
@@ -22,6 +26,10 @@ final class AppController: NSObject {
 
     @objc func activateStaticZoom() {
         modeCoordinator.handle(.activateStaticZoom)
+    }
+
+    @objc func showSettings() {
+        settingsWindowController.show()
     }
 
     @objc func checkPermissions() {

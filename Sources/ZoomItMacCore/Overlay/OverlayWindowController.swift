@@ -9,11 +9,21 @@ private final class OverlayWindow: NSWindow {
 final class OverlayWindowController {
     private var window: NSWindow?
     private weak var canvasView: ZoomCanvasView?
+    private var viewportController: ZoomViewportController?
+    private var zoomTimer: Timer?
+    private var zoomAnimationCompletion: (() -> Void)?
+
+    // ZoomIt's nominal telescope cadence is ZOOM_LEVEL_STEP_TIME (20ms), but on
+    // Windows WM_TIMER messages are coalesced and effectively fire slower, so the
+    // real animation is more deliberate. Use ~33ms (≈30fps) to match that feel
+    // while keeping ZoomIt's 1.1x/0.8x per-step factors.
+    private static let zoomStepInterval: TimeInterval = 1.0 / 30.0
 
     func show(
         frame capturedFrame: CapturedFrame,
         viewportController: ZoomViewportController,
         annotationController: AnnotationController,
+        smoothImage: Bool,
         commandSink: @escaping (AppCommand) -> Void
     ) {
         close()
@@ -36,6 +46,7 @@ final class OverlayWindowController {
             capturedFrame: capturedFrame,
             viewportController: viewportController,
             annotationController: annotationController,
+            smoothImage: smoothImage,
             commandSink: commandSink
         )
         window.contentView = canvasView
@@ -47,6 +58,46 @@ final class OverlayWindowController {
         window.makeFirstResponder(canvasView)
         self.canvasView = canvasView
         self.window = window
+        self.viewportController = viewportController
+    }
+
+    /// Drives the viewport's telescope zoom animation, redrawing each step, and
+    /// invokes `completion` once the target zoom is reached.
+    func runZoomAnimation(completion: (() -> Void)? = nil) {
+        zoomTimer?.invalidate()
+        zoomTimer = nil
+
+        guard let viewportController, viewportController.isAnimatingZoom else {
+            completion?()
+            return
+        }
+
+        zoomAnimationCompletion = completion
+        let timer = Timer(timeInterval: Self.zoomStepInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handleZoomTick()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        zoomTimer = timer
+    }
+
+    private func handleZoomTick() {
+        guard let viewportController else {
+            zoomTimer?.invalidate()
+            zoomTimer = nil
+            return
+        }
+
+        let continuing = viewportController.advanceZoomAnimation()
+        canvasView?.needsDisplay = true
+        if !continuing {
+            zoomTimer?.invalidate()
+            zoomTimer = nil
+            let completion = zoomAnimationCompletion
+            zoomAnimationCompletion = nil
+            completion?()
+        }
     }
 
     func updateInteractionMode(_ mode: AppMode) {
@@ -59,11 +110,16 @@ final class OverlayWindowController {
     }
 
     func close() {
+        zoomTimer?.invalidate()
+        zoomTimer = nil
+        zoomAnimationCompletion = nil
+
         guard let window else { return }
 
         canvasView?.prepareForClose()
         window.orderOut(nil)
         canvasView = nil
+        viewportController = nil
         self.window = nil
 
         // Defer the final close so the window and its content view are not
