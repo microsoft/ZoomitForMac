@@ -11,6 +11,9 @@ final class ZoomCanvasView: NSView {
     private var isDrawingMode = false
     private var isStroking = false
     private var isDrawOnly = false
+    /// The tool of the in-progress stroke, used to hide the pen cursor while a
+    /// shape (line/arrow/rectangle/ellipse) is being dragged out.
+    private var activeStrokeTool: AnnotationTool?
     private var cursorHidden = false
     private var scrollZoomAccumulator: CGFloat = 0
     private let smoothImage: Bool
@@ -30,21 +33,24 @@ final class ZoomCanvasView: NSView {
 
     var interactionMode: AppMode = .staticZoom {
         didSet {
+            let leftTypingMode = oldValue == .typing && interactionMode != .typing
             switch interactionMode {
             case .typing:
                 exitDrawingMode()
                 // Place the caret at the current cursor position, like ZoomIt.
                 annotationController.setInsertionPoint(contentPoint(forViewPoint: pointerViewPoint))
-                needsDisplay = true
             case .drawOnly:
                 // Draw-without-zoom starts already in drawing mode so the first
                 // click begins a stroke immediately.
                 isDrawOnly = true
                 enterDrawingMode()
-                needsDisplay = true
             default:
                 break
             }
+            if leftTypingMode {
+                anchorCursorAfterTyping()
+            }
+            needsDisplay = true
         }
     }
 
@@ -115,8 +121,20 @@ final class ZoomCanvasView: NSView {
         }
         context.restoreGState()
 
-        if isDrawingMode {
+        if isDrawingMode && !isDrawingShapeStroke {
             drawCursorIndicator(in: context, source: source)
+        }
+    }
+
+    /// True while the user is actively dragging out a shape, where the pen dot
+    /// would just clutter the shape being drawn.
+    private var isDrawingShapeStroke: Bool {
+        guard isStroking, let tool = activeStrokeTool else { return false }
+        switch tool {
+        case .line, .arrow, .rectangle, .ellipse:
+            return true
+        default:
+            return false
         }
     }
 
@@ -156,6 +174,7 @@ final class ZoomCanvasView: NSView {
         annotationController.setInsertionPoint(point)
         annotationController.begin(at: point, tool: tool)
         isStroking = true
+        activeStrokeTool = tool
         needsDisplay = true
     }
 
@@ -172,6 +191,7 @@ final class ZoomCanvasView: NSView {
         if isDrawingMode && isStroking {
             annotationController.end(at: contentPoint(for: event))
             isStroking = false
+            activeStrokeTool = nil
         }
         needsDisplay = true
     }
@@ -402,12 +422,33 @@ final class ZoomCanvasView: NSView {
         guard isDrawingMode else { return }
         isDrawingMode = false
         isStroking = false
+        activeStrokeTool = nil
         blankScreen = nil
         // Keep the zoom anchored where it was while drawing. The physical mouse
         // moved around the screen while drawing, so warp the (hidden) system
         // cursor back to the frozen anchor. This keeps panning continuous and
         // prevents the view from jumping when leaving drawing mode.
         if let anchor = latestCursorLocation {
+            warpCursor(toGlobal: anchor)
+        }
+    }
+
+    /// When typing mode ends, the hidden system cursor is wherever the user
+    /// moved it to place the caret, so the next mouse move would re-anchor the
+    /// view there. This mirrors ZoomIt's `WM_USER_TYPING_OFF` handling:
+    ///   * In drawing mode the canvas is frozen, so move the cursor to the
+    ///     caret (`cursorRc`) so drawing continues from where the text ended.
+    ///   * In static zoom we must restore the cursor to where typing began
+    ///     (`textStartPt`) so the zoomed viewport does not recenter on the
+    ///     caret. That entry point is the still-frozen `latestCursorLocation`.
+    private func anchorCursorAfterTyping() {
+        if isDrawingMode {
+            guard let caret = annotationController.typingCaret(),
+                  let screenPoint = screenLocation(forContentPoint: caret.origin) else { return }
+            latestCursorLocation = screenPoint
+            warpCursor(toGlobal: screenPoint)
+        } else if let anchor = latestCursorLocation {
+            // Keep the zoom window anchored where it was before typing.
             warpCursor(toGlobal: anchor)
         }
     }

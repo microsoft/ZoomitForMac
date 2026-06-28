@@ -8,7 +8,9 @@ final class AppController: NSObject {
     private let modeCoordinator: ModeCoordinator
     private lazy var settingsWindowController = SettingsWindowController(
         settingsStore: settingsStore,
-        onHotKeyChange: { [weak self] in self?.hotkeyService.reloadHotkey() }
+        onHotKeyChange: { [weak self] in self?.hotkeyService.reloadHotkey() },
+        onSuspendHotkeys: { [weak self] in self?.hotkeyService.stop() },
+        onResumeHotkeys: { [weak self] in self?.hotkeyService.start() }
     )
 
     init(
@@ -34,7 +36,7 @@ final class AppController: NSObject {
 
     @objc func checkPermissions() {
         let state = permissionService.currentState()
-        let message = "Screen Recording: \(state.screenCapture.isGranted ? "Granted" : "Missing")\nAccessibility: \(state.accessibility.isGranted ? "Granted" : "Missing")"
+        let message = "Screen Recording: \(state.screenCapture.isGranted ? "Granted" : "Missing")"
         let alert = NSAlert()
         alert.messageText = "ZoomIt Permissions"
         alert.informativeText = message

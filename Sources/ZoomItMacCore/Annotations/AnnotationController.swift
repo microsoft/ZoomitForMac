@@ -205,14 +205,14 @@ final class AnnotationController {
             context.strokePath()
         case .line, .arrow:
             guard let last = annotation.points.last else { return }
-            // Only draw the arrowhead once the mouse has actually moved, so the
-            // direction of the arrow is unambiguous; before then show a plain
-            // line (the shaft) without a tip.
-            let hasMoved = annotation.points.count >= 2 && (last.x != first.x || last.y != first.y)
-            if annotation.tool == .arrow && hasMoved {
-                // The arrowhead sits at the moving end and points in the
-                // direction of the line as measured from the start point.
-                drawArrow(tail: first, tip: last, width: annotation.style.rootWidth, color: color, in: context)
+            // Only draw the arrowhead once the shaft is long enough to make the
+            // direction unambiguous; until then show a plain line without a tip.
+            let shaftLength = hypot(last.x - first.x, last.y - first.y)
+            let headLength = annotation.style.rootWidth * 3.5
+            if annotation.tool == .arrow && annotation.points.count >= 2 && shaftLength >= headLength {
+                // ZoomIt anchors the arrowhead at the start point (where the
+                // drag began) and trails the shaft out to the current cursor.
+                drawArrow(tail: last, tip: first, width: annotation.style.rootWidth, color: color, in: context)
             } else {
                 context.move(to: first)
                 context.addLine(to: last)

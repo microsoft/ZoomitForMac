@@ -4,9 +4,11 @@ import AppKit
 /// exposing the Zoom, Draw, and Type settings that ZoomIt supports. Each tab
 /// carries the same kind of descriptive help text the Windows dialog shows.
 @MainActor
-final class SettingsWindowController: NSObject {
+final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let settingsStore: SettingsStore
     private let onHotKeyChange: () -> Void
+    private let onSuspendHotkeys: () -> Void
+    private let onResumeHotkeys: () -> Void
     private var settings: AppSettings
 
     private static let homepageURLString = "http://www.sysinternals.com"
@@ -19,6 +21,9 @@ final class SettingsWindowController: NSObject {
     // Type tab controls.
     private weak var fontSampleLabel: NSTextField?
 
+    // General tab controls.
+    private weak var launchAtLoginCheckbox: NSButton?
+
     // Hotkey recorders.
     private enum HotKeyTarget {
         case zoom
@@ -29,9 +34,16 @@ final class SettingsWindowController: NSObject {
     private var hotKeyMonitor: Any?
     private var recordingTarget: HotKeyTarget?
 
-    init(settingsStore: SettingsStore, onHotKeyChange: @escaping () -> Void) {
+    init(
+        settingsStore: SettingsStore,
+        onHotKeyChange: @escaping () -> Void,
+        onSuspendHotkeys: @escaping () -> Void,
+        onResumeHotkeys: @escaping () -> Void
+    ) {
         self.settingsStore = settingsStore
         self.onHotKeyChange = onHotKeyChange
+        self.onSuspendHotkeys = onSuspendHotkeys
+        self.onResumeHotkeys = onResumeHotkeys
         self.settings = settingsStore.load()
         super.init()
     }
@@ -47,9 +59,19 @@ final class SettingsWindowController: NSObject {
         guard let window else { return }
         hotKeyButton?.title = zoomHotKeyDisplayString()
         drawHotKeyButton?.title = drawHotKeyDisplayString()
+        launchAtLoginCheckbox?.state = LaunchAtLogin.isEnabled ? .on : .off
+        // Suspend the global hotkeys while the dialog is open so the user can
+        // record a new shortcut without it firing; they resume on close.
+        onSuspendHotkeys()
         NSApp.activate(ignoringOtherApps: true)
         window.center()
         window.makeKeyAndOrderFront(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        // Cancel any in-progress recording and re-enable the global hotkeys.
+        finishRecording()
+        onResumeHotkeys()
     }
 
     // MARK: - Window construction
@@ -61,6 +83,7 @@ final class SettingsWindowController: NSObject {
         // matter which tab is selected.
         let contentWidth: CGFloat = 452
         let tabs: [(String, NSView)] = [
+            ("General", makeGeneralTab()),
             ("Zoom", makeZoomTab()),
             ("Draw", makeDrawTab()),
             ("Type", makeTypeTab())
@@ -119,6 +142,7 @@ final class SettingsWindowController: NSObject {
         window.title = "ZoomIt Settings"
         window.contentView = container
         window.isReleasedWhenClosed = false
+        window.delegate = self
 
         // Size the window to fit the (now equal-height) tabs plus the footer.
         container.layoutSubtreeIfNeeded()
@@ -205,6 +229,36 @@ final class SettingsWindowController: NSObject {
         stack.alignment = .centerY
         stack.spacing = 8
         return stack
+    }
+
+    // MARK: - General tab
+
+    private func makeGeneralTab() -> NSView {
+        let help = makeLabel(
+            "ZoomIt runs in the menu bar. Use the Zoom and Draw tabs to set the keyboard shortcuts that activate it.",
+            wraps: true
+        )
+
+        let launchCheck = NSButton(checkboxWithTitle: "Launch ZoomIt when I log in", target: self, action: #selector(toggleLaunchAtLogin(_:)))
+        launchCheck.state = LaunchAtLogin.isEnabled ? .on : .off
+        launchAtLoginCheckbox = launchCheck
+
+        return makeColumn([help, launchCheck])
+    }
+
+    @objc private func toggleLaunchAtLogin(_ sender: NSButton) {
+        let enable = sender.state == .on
+        do {
+            try LaunchAtLogin.setEnabled(enable)
+        } catch {
+            // Revert the checkbox and explain why it could not be changed.
+            sender.state = enable ? .off : .on
+            let alert = NSAlert()
+            alert.messageText = "Couldn’t update the login item"
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
     }
 
     // MARK: - Zoom tab
@@ -300,13 +354,26 @@ final class SettingsWindowController: NSObject {
             return nil
         }
 
+        let newCode = Int(event.keyCode)
+        let newModifiers = modifiers.rawValue
+
         switch recordingTarget {
         case .zoom:
-            settings.hotKeyCode = Int(event.keyCode)
-            settings.hotKeyModifiers = modifiers.rawValue
+            // Reject a shortcut already assigned to the draw hotkey.
+            if newCode == settings.drawHotKeyCode && newModifiers == settings.drawHotKeyModifiers {
+                NSSound.beep()
+                return nil
+            }
+            settings.hotKeyCode = newCode
+            settings.hotKeyModifiers = newModifiers
         case .draw:
-            settings.drawHotKeyCode = Int(event.keyCode)
-            settings.drawHotKeyModifiers = modifiers.rawValue
+            // Reject a shortcut already assigned to the zoom hotkey.
+            if newCode == settings.hotKeyCode && newModifiers == settings.hotKeyModifiers {
+                NSSound.beep()
+                return nil
+            }
+            settings.drawHotKeyCode = newCode
+            settings.drawHotKeyModifiers = newModifiers
         case nil:
             return nil
         }

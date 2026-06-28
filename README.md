@@ -19,7 +19,6 @@ ZoomItMac is the initial implementation scaffold for a macOS utility modeled aft
 - macOS 14 or newer.
 - Xcode command-line tools.
 - Screen Recording permission for capture.
-- Accessibility permission for reliable global keyboard observation.
 
 ## Build
 
@@ -45,10 +44,11 @@ The app appears as a menu-bar item titled `ZoomIt`. Press the global hotkey (def
 
 ## Settings
 
-Open the **Settings…** item from the menu-bar menu (or `Command+,`) to configure ZoomIt. The window mirrors the Windows ZoomIt options dialog with three tabs, includes the same kind of descriptive help text on each tab, and shows a `Sysinternals ZoomIt` version/copyright footer. Changes are saved immediately to `UserDefaults`:
+Open the **Settings…** item from the menu-bar menu (or `Command+,`) to configure ZoomIt. The window mirrors the Windows ZoomIt options dialog with tabbed panes, includes the same kind of descriptive help text on each tab, and shows a `Sysinternals ZoomIt` version/copyright footer. Changes are saved immediately to `UserDefaults`:
 
+- **General**: launch ZoomIt at login (requires the bundled `.app`; see Packaging).
 - **Zoom**: the global zoom-toggle hotkey (click the button and type a new shortcut), initial magnification level (`1.25×`–`4×`), animate zoom in/out, and smooth (interpolated) zoomed image.
-- **Draw**: default pen width. The pen color is chosen dynamically while drawing (R/G/B/O/Y/P/W/K), so it is not a setting.
+- **Draw**: the global draw-without-zoom hotkey (default `Control+2`) and default pen width. The pen color is chosen dynamically while drawing (R/G/B/O/Y/P/W/K), so it is not a setting.
 - **Type**: typing-mode font (family and size) via the standard macOS font panel.
 
 ### Choosing a hotkey
