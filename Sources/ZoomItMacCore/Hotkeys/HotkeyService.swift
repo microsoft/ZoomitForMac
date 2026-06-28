@@ -10,6 +10,8 @@ final class HotkeyService {
     private var liveHotKeyRef: EventHotKeyRef?
     private var snipCopyHotKeyRef: EventHotKeyRef?
     private var snipSaveHotKeyRef: EventHotKeyRef?
+    private var recordHotKeyRef: EventHotKeyRef?
+    private var recordRegionHotKeyRef: EventHotKeyRef?
     private var zoomInNavRef: EventHotKeyRef?
     private var zoomOutNavRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
@@ -115,6 +117,8 @@ final class HotkeyService {
                 case 5: command = .zoomOutOrExit
                 case 6: command = .snipRegion(save: false)
                 case 7: command = .snipRegion(save: true)
+                case 8: command = .toggleRecording(region: false)
+                case 9: command = .toggleRecording(region: true)
                 default: return noErr
                 }
 
@@ -189,6 +193,28 @@ final class HotkeyService {
             0,
             &snipSaveHotKeyRef
         )
+
+        // Recording: the base shortcut records the whole screen; the same
+        // shortcut with Shift toggled records a selected region.
+        let recordModifiers = NSEvent.ModifierFlags(rawValue: settings.recordHotKeyModifiers)
+        RegisterEventHotKey(
+            UInt32(settings.recordHotKeyCode),
+            carbonModifiers(from: recordModifiers),
+            EventHotKeyID(signature: signature, id: 8),
+            target,
+            0,
+            &recordHotKeyRef
+        )
+
+        let recordRegionModifiers = NSEvent.ModifierFlags(rawValue: settings.recordHotKeyModifiers ^ NSEvent.ModifierFlags.shift.rawValue)
+        RegisterEventHotKey(
+            UInt32(settings.recordHotKeyCode),
+            carbonModifiers(from: recordRegionModifiers),
+            EventHotKeyID(signature: signature, id: 9),
+            target,
+            0,
+            &recordRegionHotKeyRef
+        )
     }
 
     private func unregisterHotKey() {
@@ -212,6 +238,14 @@ final class HotkeyService {
             UnregisterEventHotKey(snipSaveHotKeyRef)
         }
         snipSaveHotKeyRef = nil
+        if let recordHotKeyRef {
+            UnregisterEventHotKey(recordHotKeyRef)
+        }
+        recordHotKeyRef = nil
+        if let recordRegionHotKeyRef {
+            UnregisterEventHotKey(recordRegionHotKeyRef)
+        }
+        recordRegionHotKeyRef = nil
     }
 
     private func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {

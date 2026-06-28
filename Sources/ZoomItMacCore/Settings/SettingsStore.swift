@@ -26,6 +26,18 @@ struct AppSettings: Equatable {
     /// the same shortcut with Shift toggled saves it to a file instead.
     var snipHotKeyCode: Int
     var snipHotKeyModifiers: UInt
+    /// Virtual key code and modifier-flag raw value for the global screen
+    /// recording hotkey. The base shortcut records the whole screen; the same
+    /// shortcut with Shift toggled records a selected region.
+    var recordHotKeyCode: Int
+    var recordHotKeyModifiers: UInt
+    /// Whether to capture system audio in recordings.
+    var recordSystemAudio: Bool
+    /// Whether to capture microphone audio in recordings.
+    var recordMicrophone: Bool
+    /// The unique ID of the microphone device to record, or empty for the
+    /// system default input.
+    var microphoneDeviceID: String
 
     /// Initial magnification levels offered on the Zoom settings tab, matching
     /// ZoomIt's g_ZoomLevels slider values.
@@ -52,7 +64,14 @@ struct AppSettings: Equatable {
         // Control+6 (kVK_ANSI_6 = 22) snips a region to the clipboard;
         // Control+Shift+6 snips a region to a file.
         snipHotKeyCode: 22,
-        snipHotKeyModifiers: 1 << 18
+        snipHotKeyModifiers: 1 << 18,
+        // Control+5 (kVK_ANSI_5 = 23) records the screen;
+        // Control+Shift+5 records a selected region.
+        recordHotKeyCode: 23,
+        recordHotKeyModifiers: 1 << 18,
+        recordSystemAudio: false,
+        recordMicrophone: false,
+        microphoneDeviceID: ""
     )
 }
 
@@ -79,6 +98,11 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let liveHotKeyModifiers = "liveHotKeyModifiers"
         static let snipHotKeyCode = "snipHotKeyCode"
         static let snipHotKeyModifiers = "snipHotKeyModifiers"
+        static let recordHotKeyCode = "recordHotKeyCode"
+        static let recordHotKeyModifiers = "recordHotKeyModifiers"
+        static let recordSystemAudio = "recordSystemAudio"
+        static let recordMicrophone = "recordMicrophone"
+        static let microphoneDeviceID = "microphoneDeviceID"
     }
 
     private let defaults: UserDefaults
@@ -154,6 +178,26 @@ final class UserDefaultsSettingsStore: SettingsStore {
             settings.snipHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.snipHotKeyModifiers))
         }
 
+        if defaults.object(forKey: Key.recordHotKeyCode) != nil {
+            settings.recordHotKeyCode = defaults.integer(forKey: Key.recordHotKeyCode)
+        }
+
+        if defaults.object(forKey: Key.recordHotKeyModifiers) != nil {
+            settings.recordHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.recordHotKeyModifiers))
+        }
+
+        if defaults.object(forKey: Key.recordSystemAudio) != nil {
+            settings.recordSystemAudio = defaults.bool(forKey: Key.recordSystemAudio)
+        }
+
+        if defaults.object(forKey: Key.recordMicrophone) != nil {
+            settings.recordMicrophone = defaults.bool(forKey: Key.recordMicrophone)
+        }
+
+        if let micID = defaults.string(forKey: Key.microphoneDeviceID) {
+            settings.microphoneDeviceID = micID
+        }
+
         return settings
     }
 
@@ -174,5 +218,10 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(Int(bitPattern: settings.liveHotKeyModifiers), forKey: Key.liveHotKeyModifiers)
         defaults.set(settings.snipHotKeyCode, forKey: Key.snipHotKeyCode)
         defaults.set(Int(bitPattern: settings.snipHotKeyModifiers), forKey: Key.snipHotKeyModifiers)
+        defaults.set(settings.recordHotKeyCode, forKey: Key.recordHotKeyCode)
+        defaults.set(Int(bitPattern: settings.recordHotKeyModifiers), forKey: Key.recordHotKeyModifiers)
+        defaults.set(settings.recordSystemAudio, forKey: Key.recordSystemAudio)
+        defaults.set(settings.recordMicrophone, forKey: Key.recordMicrophone)
+        defaults.set(settings.microphoneDeviceID, forKey: Key.microphoneDeviceID)
     }
 }

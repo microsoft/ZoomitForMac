@@ -218,6 +218,11 @@ public enum SelfTestRunner {
         settings.liveHotKeyModifiers = NSEvent.ModifierFlags([.control, .shift]).rawValue
         settings.snipHotKeyCode = 22
         settings.snipHotKeyModifiers = NSEvent.ModifierFlags([.control, .option]).rawValue
+        settings.recordHotKeyCode = 23
+        settings.recordHotKeyModifiers = NSEvent.ModifierFlags([.control, .command]).rawValue
+        settings.recordSystemAudio = true
+        settings.recordMicrophone = true
+        settings.microphoneDeviceID = "test-mic-id"
         store.save(settings)
 
         try expect(store.load() == settings, "Expected saved settings to round-trip through the store")

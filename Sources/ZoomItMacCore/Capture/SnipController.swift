@@ -1,8 +1,9 @@
 import AppKit
 
 /// A borderless window that can still become key, so the selection view
-/// receives key events (Escape) and the crosshair cursor is shown.
-private final class SnipWindow: NSWindow {
+/// receives key events (Escape) and the crosshair cursor is shown. Shared by
+/// the snip and region-recording selectors.
+final class SnipWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 }

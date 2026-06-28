@@ -23,6 +23,15 @@ final class ModeCoordinator {
         permissionService: permissionService
     )
     private var isSnipping = false
+    /// Drives screen recording (Control+5 / Control+Shift+5).
+    private lazy var recordingController = RecordingController(
+        captureService: captureService,
+        displayManager: displayManager,
+        permissionService: permissionService,
+        settingsStore: settingsStore
+    )
+    /// Notified when recording starts/stops so the UI (menu-bar icon) can react.
+    var onRecordingStateChanged: ((Bool) -> Void)?
     /// Invoked when live zoom starts/stops so global Control+Up/Down zoom
     /// hotkeys can be registered only while live zoom is active.
     var onBeginLiveZoomNavigation: (() -> Void)?
@@ -87,6 +96,8 @@ final class ModeCoordinator {
             overlayController.requestRedraw()
         case .snipRegion(let save):
             startSnip(save: save)
+        case .toggleRecording(let region):
+            toggleRecording(region: region)
         case .setTool(let tool):
             annotationController.currentTool = tool
         case .setColor(let color):
@@ -111,7 +122,7 @@ final class ModeCoordinator {
         case .decreaseFontSize:
             annotationController.decreaseFontSize()
             overlayController.requestRedraw()
-        case .captureStill, .startPanorama, .toggleRecording:
+        case .captureStill, .startPanorama:
             NSSound.beep()
         }
     }
@@ -362,6 +373,21 @@ final class ModeCoordinator {
             }
         default:
             NSSound.beep()
+        }
+    }
+
+    /// Starts/stops screen recording. Recording runs independently of the zoom
+    /// overlay so the user can zoom and draw (and have those captured) while a
+    /// recording is in progress.
+    private func toggleRecording(region: Bool) {
+        // Make sure the Save dialog (shown after stopping) isn't hidden behind a
+        // zoom overlay by dismissing any active overlay first.
+        recordingController.onWillShowSaveDialog = { [weak self] in
+            guard let self, self.mode != .idle else { return }
+            self.exitActiveMode()
+        }
+        recordingController.toggle(region: region) { [weak self] recording in
+            self?.onRecordingStateChanged?(recording)
         }
     }
 

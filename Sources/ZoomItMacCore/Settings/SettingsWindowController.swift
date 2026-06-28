@@ -9,6 +9,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let onHotKeyChange: () -> Void
     private let onSuspendHotkeys: () -> Void
     private let onResumeHotkeys: () -> Void
+    private let onRequestMicrophone: () -> Void
     private var settings: AppSettings
 
     private static let homepageURLString = "http://www.sysinternals.com"
@@ -24,17 +25,22 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     // General tab controls.
     private weak var launchAtLoginCheckbox: NSButton?
 
+    // Record tab controls.
+    private weak var microphonePopup: NSPopUpButton?
+
     // Hotkey recorders.
     private enum HotKeyTarget {
         case zoom
         case draw
         case live
         case snip
+        case record
     }
     private weak var hotKeyButton: NSButton?
     private weak var drawHotKeyButton: NSButton?
     private weak var liveHotKeyButton: NSButton?
     private weak var snipHotKeyButton: NSButton?
+    private weak var recordHotKeyButton: NSButton?
     private var hotKeyMonitor: Any?
     private var recordingTarget: HotKeyTarget?
 
@@ -42,12 +48,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         settingsStore: SettingsStore,
         onHotKeyChange: @escaping () -> Void,
         onSuspendHotkeys: @escaping () -> Void,
-        onResumeHotkeys: @escaping () -> Void
+        onResumeHotkeys: @escaping () -> Void,
+        onRequestMicrophone: @escaping () -> Void
     ) {
         self.settingsStore = settingsStore
         self.onHotKeyChange = onHotKeyChange
         self.onSuspendHotkeys = onSuspendHotkeys
         self.onResumeHotkeys = onResumeHotkeys
+        self.onRequestMicrophone = onRequestMicrophone
         self.settings = settingsStore.load()
         super.init()
     }
@@ -65,6 +73,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         drawHotKeyButton?.title = drawHotKeyDisplayString()
         liveHotKeyButton?.title = liveHotKeyDisplayString()
         snipHotKeyButton?.title = snipHotKeyDisplayString()
+        recordHotKeyButton?.title = recordHotKeyDisplayString()
         launchAtLoginCheckbox?.state = LaunchAtLogin.isEnabled ? .on : .off
         // Suspend the global hotkeys while the dialog is open so the user can
         // record a new shortcut without it firing; they resume on close.
@@ -93,7 +102,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             ("Zoom", makeZoomTab()),
             ("Draw", makeDrawTab()),
             ("Type", makeTypeTab()),
-            ("Snip", makeSnipTab())
+            ("Snip", makeSnipTab()),
+            ("Record", makeRecordTab())
         ]
 
         var maxContentHeight: CGFloat = 0
@@ -374,6 +384,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         beginRecording(target: .snip, sender: sender)
     }
 
+    @objc private func toggleRecordHotKeyRecording(_ sender: NSButton) {
+        beginRecording(target: .record, sender: sender)
+    }
+
     private func beginRecording(target: HotKeyTarget, sender: NSButton) {
         if recordingTarget != nil {
             // A recording is already in progress; clicking any recorder stops it.
@@ -439,6 +453,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             }
             settings.snipHotKeyCode = newCode
             settings.snipHotKeyModifiers = newModifiers
+        case .record:
+            if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
+                conflictsWithLive(code: newCode, modifiers: newModifiers) {
+                NSSound.beep()
+                return nil
+            }
+            settings.recordHotKeyCode = newCode
+            settings.recordHotKeyModifiers = newModifiers
         case nil:
             return nil
         }
@@ -470,6 +493,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         drawHotKeyButton?.title = drawHotKeyDisplayString()
         liveHotKeyButton?.title = liveHotKeyDisplayString()
         snipHotKeyButton?.title = snipHotKeyDisplayString()
+        recordHotKeyButton?.title = recordHotKeyDisplayString()
     }
 
     private func zoomHotKeyDisplayString() -> String {
@@ -486,6 +510,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func snipHotKeyDisplayString() -> String {
         Self.describe(keyCode: settings.snipHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.snipHotKeyModifiers))
+    }
+
+    private func recordHotKeyDisplayString() -> String {
+        Self.describe(keyCode: settings.recordHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.recordHotKeyModifiers))
     }
 
     // MARK: - Draw tab
@@ -578,6 +606,72 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let snipHotKeyRow = makeRow([makeLabel("Snip region:"), snipHotKeyButton])
 
         return makeColumn([help, snipHotKeyRow])
+    }
+
+    // MARK: - Record tab
+
+    private func makeRecordTab() -> NSView {
+        let help = makeLabel(
+            """
+            Press the record shortcut to record the whole screen to an MP4 file; hold Shift with the shortcut to drag a rectangle and record just that region. Press the shortcut again to stop, then choose where to save the recording.
+
+            Enable system audio to capture what you hear, and choose a microphone to also record your voice. Microphone recording requires the bundled app and microphone permission.
+            """,
+            wraps: true
+        )
+
+        let recordHotKeyButton = NSButton(title: recordHotKeyDisplayString(), target: self, action: #selector(toggleRecordHotKeyRecording(_:)))
+        recordHotKeyButton.bezelStyle = .rounded
+        recordHotKeyButton.setButtonType(.momentaryPushIn)
+        recordHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+        self.recordHotKeyButton = recordHotKeyButton
+        let recordHotKeyRow = makeRow([makeLabel("Record:"), recordHotKeyButton])
+
+        let systemAudioCheck = NSButton(checkboxWithTitle: "Capture system audio", target: self, action: #selector(recordSystemAudioChanged(_:)))
+        systemAudioCheck.state = settings.recordSystemAudio ? .on : .off
+
+        let micCheck = NSButton(checkboxWithTitle: "Capture microphone", target: self, action: #selector(recordMicrophoneChanged(_:)))
+        micCheck.state = settings.recordMicrophone ? .on : .off
+
+        let micPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        micPopup.translatesAutoresizingMaskIntoConstraints = false
+        let microphones = AudioDevices.availableMicrophones()
+        var selectedIndex = 0
+        for (index, device) in microphones.enumerated() {
+            micPopup.addItem(withTitle: device.name)
+            micPopup.lastItem?.representedObject = device.id
+            if device.id == settings.microphoneDeviceID {
+                selectedIndex = index
+            }
+        }
+        micPopup.selectItem(at: selectedIndex)
+        micPopup.target = self
+        micPopup.action = #selector(microphoneChanged(_:))
+        micPopup.isEnabled = settings.recordMicrophone
+        microphonePopup = micPopup
+        let micRow = makeRow([makeLabel("Microphone:"), micPopup])
+
+        return makeColumn([help, recordHotKeyRow, systemAudioCheck, micCheck, micRow])
+    }
+
+    @objc private func recordSystemAudioChanged(_ sender: NSButton) {
+        settings.recordSystemAudio = (sender.state == .on)
+        persist()
+    }
+
+    @objc private func recordMicrophoneChanged(_ sender: NSButton) {
+        settings.recordMicrophone = (sender.state == .on)
+        microphonePopup?.isEnabled = settings.recordMicrophone
+        persist()
+        // Trigger the microphone permission prompt the first time it's enabled.
+        if settings.recordMicrophone {
+            onRequestMicrophone()
+        }
+    }
+
+    @objc private func microphoneChanged(_ sender: NSPopUpButton) {
+        settings.microphoneDeviceID = (sender.selectedItem?.representedObject as? String) ?? ""
+        persist()
     }
 
     private func currentTypingFont() -> NSFont {

@@ -10,7 +10,8 @@ final class AppController: NSObject {
         settingsStore: settingsStore,
         onHotKeyChange: { [weak self] in self?.hotkeyService.reloadHotkey() },
         onSuspendHotkeys: { [weak self] in self?.hotkeyService.stop() },
-        onResumeHotkeys: { [weak self] in self?.hotkeyService.start() }
+        onResumeHotkeys: { [weak self] in self?.hotkeyService.start() },
+        onRequestMicrophone: { [weak self] in self?.permissionService.requestMicrophoneAccess() }
     )
 
     init(
@@ -34,21 +35,48 @@ final class AppController: NSObject {
         modeCoordinator.handle(.activateLiveZoom)
     }
 
+    @objc func toggleRecording() {
+        modeCoordinator.handle(.toggleRecording(region: false))
+    }
+
     @objc func showSettings() {
         settingsWindowController.show()
     }
 
     @objc func checkPermissions() {
         let state = permissionService.currentState()
-        let message = "Screen Recording: \(state.screenCapture.isGranted ? "Granted" : "Missing")"
+        let screen = state.screenCapture.isGranted ? "Granted" : "Missing"
+        let micStatus = permissionService.microphoneStatus()
+        let mic: String
+        switch micStatus {
+        case .granted: mic = "Granted"
+        case .denied: mic = "Denied"
+        case .notDetermined: mic = "Not requested"
+        }
+
         let alert = NSAlert()
         alert.messageText = "ZoomIt Permissions"
-        alert.informativeText = message
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Open System Settings")
+        alert.informativeText = """
+        Screen Recording: \(screen)
+        Microphone: \(mic)
 
-        if alert.runModal() == .alertSecondButtonReturn {
+        Screen Recording is required for zoom, snip, and recording. Microphone is optional — used only when recording your voice.
+        """
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Screen Recording Settings…")
+        alert.addButton(withTitle: micStatus == .notDetermined ? "Grant Microphone…" : "Microphone Settings…")
+
+        switch alert.runModal() {
+        case .alertSecondButtonReturn:
             permissionService.openSystemSettings()
+        case .alertThirdButtonReturn:
+            if micStatus == .notDetermined {
+                permissionService.requestMicrophoneAccess()
+            } else {
+                permissionService.openMicrophoneSettings()
+            }
+        default:
+            break
         }
     }
 

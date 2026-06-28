@@ -50,7 +50,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         statusItem = makeStatusItem(controller: appController!)
+        modeCoordinator.onRecordingStateChanged = { [weak self] recording in
+            self?.updateRecordingIndicator(recording)
+        }
         hotkeyService.start()
+    }
+
+    /// Swaps the menu-bar icon for a red record indicator while recording.
+    private func updateRecordingIndicator(_ recording: Bool) {
+        guard let button = statusItem?.button else { return }
+        if recording {
+            let config = NSImage.SymbolConfiguration(paletteColors: [.systemRed])
+            let image = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "Recording")?
+                .withSymbolConfiguration(config)
+            image?.size = NSSize(width: 18, height: 18)
+            button.image = image
+        } else {
+            button.image = Self.menuBarIcon()
+        }
     }
 
     private func makeStatusItem(controller: AppController) -> NSStatusItem {
@@ -71,6 +88,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(staticZoomItem)
         let liveZoomItem = NSMenuItem(title: "Live Zoom", action: #selector(AppController.activateLiveZoom), keyEquivalent: "")
         menu.addItem(liveZoomItem)
+        let recordItem = NSMenuItem(title: "Record Screen", action: #selector(AppController.toggleRecording), keyEquivalent: "")
+        menu.addItem(recordItem)
         menu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(AppController.showSettings), keyEquivalent: ",")
         menu.addItem(settingsItem)

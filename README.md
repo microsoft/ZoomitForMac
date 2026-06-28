@@ -14,6 +14,7 @@ ZoomItMac is a macOS utility modeled after Sysinternals ZoomIt. It provides stat
 - Text annotations in typing mode.
 - Configurable global hotkeys (Carbon `RegisterEventHotKey`): zoom (`Control+1`), draw-without-zoom (`Control+2`), and live zoom (`Control+4`).
 - Screenshot save/copy of the zoomed viewport (`Command+S` / `Command+C`) and a region snip (`Control+6` / `Control+Shift+6`) to the clipboard or a file.
+- Screen recording to MP4 (`Control+5` whole screen / `Control+Shift+5` region) with optional system audio and microphone.
 - Optional launch at login.
 
 ## Requirements
@@ -53,6 +54,7 @@ Open the **Settings…** item from the menu-bar menu (or `Command+,`) to configu
 - **Draw**: the global draw-without-zoom hotkey (default `Control+2`) and default pen width. The pen color is chosen dynamically while drawing (R/G/B/O/Y/P/W/K), so it is not a setting.
 - **Type**: typing-mode font (family and size) via the standard macOS font panel.
 - **Snip**: the global region-snip hotkey (default `Control+6`), and a description of the save/copy shortcuts.
+- **Record**: the global recording hotkey (default `Control+5`), capture-system-audio and capture-microphone options, microphone device selection, and instructions.
 
 ### Choosing a hotkey
 
@@ -113,6 +115,13 @@ Unlike Windows ZoomIt — which uses the system Magnification API — macOS expo
 - While zoomed, `Command+S` saves the entire viewport to a PNG file and `Command+C` copies it to the clipboard.
 - The region snip works any time (default `Control+6`): press the shortcut, then drag a rectangle over the screen. Releasing the drag copies the selected region to the clipboard; holding `Shift` with the shortcut (`Control+Shift+6`) saves it to a PNG file instead. `Esc` cancels.
 - Saved images are PNG files named `ZoomIt YYYY-MM-DD HHMMSS.png`. The snip hotkey is configurable on the Settings **Snip** tab.
+
+## Recording
+
+- `Control+5` records the whole screen to an MP4; `Control+Shift+5` lets you drag a rectangle and records just that region. Press the shortcut again to stop, then choose where to save the recording (named `ZoomIt YYYY-MM-DD HHMMSS.mp4`). While recording, the menu-bar icon turns into a red record indicator and an orange border outlines the recorded area (the whole screen or the selected region). The border is click-through and excluded from the capture, so it isn't part of the recording.
+- Enable **Capture system audio** to record what you hear (via ScreenCaptureKit) and **Capture microphone** with a device selection to also record your voice. The recording hotkey and audio options are on the Settings **Record** tab.
+- Zooming and drawing stay available while recording — start a recording, then use static zoom (`Control+1`) and draw-without-zoom (`Control+2`) and your annotations are captured in the recording. (Live zoom is excluded from its own capture, so it isn't recorded.)
+- Recording uses ScreenCaptureKit for video, system audio, and (on macOS 15+) the microphone — all on the same capture clock so the audio stays in sync. On macOS 14 the microphone falls back to `AVCaptureSession`. Audio is muxed to MP4 with `AVAssetWriter`. The microphone permission can be granted from the **Check Permissions** menu item (alongside Screen Recording) or by enabling **Capture microphone** in Settings, which prompts for access. The executable embeds an `Info.plist` with `NSMicrophoneUsageDescription` so the prompt works even when run as a bare binary. Note: system audio and microphone are written as separate tracks, so if you enable both, a player may play only the first — enable just the microphone to hear your voice.
 
 ## Next Implementation Steps
 

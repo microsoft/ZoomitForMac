@@ -28,6 +28,18 @@ let package = Package(
             path: "Sources/ZoomItMacApp",
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency")
+            ],
+            linkerSettings: [
+                // Embed an Info.plist into the executable so privacy usage
+                // descriptions (e.g. microphone) are present even when run as a
+                // bare SwiftPM binary, allowing permission prompts without
+                // crashing.
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "ZoomItInfo.plist"
+                ])
             ]
         ),
         .executableTarget(

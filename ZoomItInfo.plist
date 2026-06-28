@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.sysinternals.zoomitmac</string>
+    <key>CFBundleName</key>
+    <string>ZoomIt</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>ZoomIt records your microphone when you enable microphone capture for screen recordings.</string>
+</dict>
+</plist>
