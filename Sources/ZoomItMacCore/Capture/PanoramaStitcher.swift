@@ -1246,6 +1246,21 @@ public enum PanoramaStitcher {
         guard w > 0, h > 0 else { return nil }
         if frames.count == 1 { return first }
 
+        // Instrumentation: set ZOOMIT_PANO_PROFILE=1 to trace every phase to
+        // stderr, flushed immediately. If the stitch hangs, the LAST printed
+        // line pinpoints the frame/phase it is stuck in. ZOOMIT_PANO_PROFILE=2
+        // also logs per-frame match timings.
+        let profileLevel = Int(ProcessInfo.processInfo.environment["ZOOMIT_PANO_PROFILE"] ?? "") ?? 0
+        let stitchStart = DispatchTime.now()
+        func elapsedMs(_ since: DispatchTime) -> Double {
+            Double(DispatchTime.now().uptimeNanoseconds &- since.uptimeNanoseconds) / 1_000_000
+        }
+        func plog(_ message: @autoclosure () -> String) {
+            guard profileLevel > 0 else { return }
+            FileHandle.standardError.write("[pano +\(String(format: "%.0f", elapsedMs(stitchStart)))ms] \(message())\n".data(using: .utf8)!)
+        }
+        plog("begin frames=\(frames.count) frame=\(w)x\(h)")
+
         // Compute luma incrementally rather than precomputing every frame's luma
         // up front: panorama runs can hold hundreds of full-resolution frames,
         // and keeping a luma plane for each on top of the RGBA pixels can exhaust
@@ -1278,6 +1293,8 @@ public enum PanoramaStitcher {
             if isCancelled?() == true { return nil }
             progress?(5 + i * 85 / frames.count)
             guard frames[i].width == w, frames[i].height == h else { continue }
+            let matchStart = DispatchTime.now()
+            if profileLevel >= 2 { plog("frame \(i)/\(frames.count - 1) match start expected=\(expected.map { "(\($0.dx),\($0.dy))" } ?? "nil") axis=\((directionConfirmed ? axis : nil).map { "\($0)" } ?? "first-pair")") }
             let curLuma = luma(frames[i])
             let curConstantFraction = constantContentFraction(curLuma, w, h)
             let searchAxis = directionConfirmed ? axis : nil
@@ -1293,6 +1310,7 @@ public enum PanoramaStitcher {
                i > startIndex + 1,
                frames[i - 1].width == w,
                frames[i - 1].height == h {
+                if profileLevel >= 2 { plog("frame \(i) primary miss -> adjacent recovery") }
                 let previousCapturedLuma = luma(frames[i - 1])
                 if let adjacent = findShift(prevLuma: previousCapturedLuma, curLuma: curLuma, w: w, h: h,
                                             expected: expected, axis: axis) {
@@ -1316,6 +1334,14 @@ public enum PanoramaStitcher {
             }
             guard let shift else { continue }
             if shift.dx == 0 && shift.dy == 0 { continue }
+
+            let matchMs = elapsedMs(matchStart)
+            // Even at level 1, flag a frame whose match is pathologically slow:
+            // a hang shows up as one frame that never prints its "done" line, or
+            // a steadily climbing per-frame time.
+            if profileLevel >= 2 || matchMs > 250 {
+                plog("frame \(i) match done \(String(format: "%.0f", matchMs))ms shift=(\(shift.dx),\(shift.dy))")
+            }
 
             let primary = shift.axis == .horizontal ? shift.dx : shift.dy
             let sign = primary > 0 ? 1 : -1
@@ -1382,6 +1408,7 @@ public enum PanoramaStitcher {
         let canvasW = maxX - minX
         let canvasH = maxY - minY
         guard canvasW > 0, canvasH > 0 else { return nil }
+        plog("alignment done composed=\(composedIndices.count)/\(frames.count) canvas=\(canvasW)x\(canvasH)")
 
         // Composite onto the canvas using the Windows panorama model: pixels in
         // the deep overlap keep the old canvas, the new strip uses the new
@@ -1399,6 +1426,8 @@ public enum PanoramaStitcher {
         // every pixel from a single frame so the panorama stays sharp.
         let feather = max(1, min(3, featherBase / 120))
 
+        let composeStart = DispatchTime.now()
+        plog("compose start frames=\(composedIndices.count) header=\(fixedTopHeaderHeight) footer=\(fixedBottomFooterHeight)")
         for (k, index) in composedIndices.enumerated() {
             if isCancelled?() == true { return nil }
             let origin = origins[k]
@@ -1409,10 +1438,14 @@ public enum PanoramaStitcher {
                     suppressTopRows: k == 0 ? 0 : fixedTopHeaderHeight,
                     suppressBottomRows: k == composedIndices.count - 1 ? 0 : fixedBottomFooterHeight)
         }
+        plog("compose done \(String(format: "%.0f", elapsedMs(composeStart)))ms")
 
+        let repairStart = DispatchTime.now()
         repairUnwrittenPixels(dst: &canvas, written: &written, dstW: canvasW, dstH: canvasH)
+        plog("repair done \(String(format: "%.0f", elapsedMs(repairStart)))ms")
 
         progress?(100)
+        plog("stitch done total=\(String(format: "%.0f", elapsedMs(stitchStart)))ms size=\(canvasW)x\(canvasH)")
         return Frame(width: canvasW, height: canvasH, pixels: canvas)
     }
 
