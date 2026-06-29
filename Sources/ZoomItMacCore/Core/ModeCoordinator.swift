@@ -192,9 +192,6 @@ final class ModeCoordinator {
                     overlayController.runZoomAnimation()
                 }
             } catch {
-                if mode == .idle {
-                    recordingController.setWebcamExcludedFromScreenCapture(false)
-                }
                 presentError(error)
             }
         }
@@ -263,9 +260,6 @@ final class ModeCoordinator {
                     overlayController.runZoomAnimation()
                 }
             } catch {
-                if mode == .idle {
-                    recordingController.setWebcamExcludedFromScreenCapture(false)
-                }
                 stopLiveCapture()
                 presentError(error)
             }
@@ -319,9 +313,6 @@ final class ModeCoordinator {
                 // Arm drawing mode immediately so the first click starts a stroke.
                 overlayController.updateInteractionMode(.drawOnly)
             } catch {
-                if mode == .idle {
-                    recordingController.setWebcamExcludedFromScreenCapture(false)
-                }
                 presentError(error)
             }
         }
@@ -370,9 +361,7 @@ final class ModeCoordinator {
 
     private func captureDisplayForOverlay(_ display: DisplayDescriptor) async throws -> CapturedFrame {
         let excludedWindowNumbers = recordingController.webcamWindowNumberForScreenCaptureExclusion.map { [$0] } ?? []
-        let frame = try await captureService.captureDisplay(display, excludingWindowNumbers: excludedWindowNumbers)
-        recordingController.setWebcamExcludedFromScreenCapture(true)
-        return frame
+        return try await captureService.captureDisplay(display, excludingWindowNumbers: excludedWindowNumbers)
     }
 
     private func animateExit() {
@@ -389,7 +378,6 @@ final class ModeCoordinator {
         stopLiveCapture()
         overlayController.close()
         annotationController.reset()
-        recordingController.setWebcamExcludedFromScreenCapture(false)
         mode = .idle
         isExiting = false
     }
@@ -437,7 +425,6 @@ final class ModeCoordinator {
             self?.overlayController.prepareForPresentedWindow()
             self?.exitActiveMode()
         }
-        recordingController.setWebcamExcludedFromScreenCapture(mode != .idle)
         recordingController.toggle(region: region) { [weak self] recording in
             self?.onRecordingStateChanged?(recording)
         }

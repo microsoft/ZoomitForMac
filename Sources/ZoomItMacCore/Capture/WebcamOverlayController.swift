@@ -204,10 +204,6 @@ final class WebcamOverlayController {
         window = nil
     }
 
-    func setExcludedFromScreenCapture(_ excluded: Bool) {
-        window?.sharingType = excluded ? .none : .readOnly
-    }
-
     var windowNumber: Int? {
         window?.windowNumber
     }

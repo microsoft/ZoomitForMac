@@ -102,7 +102,7 @@ private final class RecordingEngine: @unchecked Sendable {
     func appendVideoImage(_ frame: RecordingImageFrame) {
         queue.async {
             guard !self.finished, self.writer.status == .writing else { return }
-            let presentationTime = self.nextVideoPresentationTime()
+            let presentationTime = self.monotonicVideoPresentationTime(for: frame.presentationTime)
             guard let sampleBuffer = self.makeSampleBuffer(from: frame.image, presentationTime: presentationTime, duration: frame.duration) else { return }
             self.appendVideoOnQueue(sampleBuffer)
         }
@@ -111,7 +111,7 @@ private final class RecordingEngine: @unchecked Sendable {
     func appendVideoImageIfNeeded(_ frame: RecordingImageFrame) {
         queue.async {
             guard !self.hasVideoSample, !self.finished, self.writer.status == .writing else { return }
-            let presentationTime = self.nextVideoPresentationTime()
+            let presentationTime = self.monotonicVideoPresentationTime(for: frame.presentationTime)
             guard let sampleBuffer = self.makeSampleBuffer(from: frame.image, presentationTime: presentationTime, duration: frame.duration) else { return }
             self.appendVideoOnQueue(sampleBuffer)
         }
@@ -120,7 +120,7 @@ private final class RecordingEngine: @unchecked Sendable {
     func appendVideoImageAtEnd(_ frame: RecordingImageFrame) {
         queue.async {
             guard !self.finished, self.writer.status == .writing else { return }
-            let presentationTime = self.nextVideoPresentationTime()
+            let presentationTime = self.monotonicVideoPresentationTime(for: frame.presentationTime)
             guard let sampleBuffer = self.makeSampleBuffer(
                 from: frame.image,
                 presentationTime: presentationTime,
@@ -134,7 +134,7 @@ private final class RecordingEngine: @unchecked Sendable {
         queue.async {
             guard !self.hasVideoSample, !self.finished, self.writer.status == .writing,
                   let image = self.makeBlackImage(),
-                  let sampleBuffer = self.makeSampleBuffer(from: image, presentationTime: self.nextVideoPresentationTime(), duration: recordingSyntheticFrameDuration) else { return }
+                  let sampleBuffer = self.makeSampleBuffer(from: image, presentationTime: self.monotonicVideoPresentationTime(for: presentationTime), duration: recordingSyntheticFrameDuration) else { return }
             self.appendVideoOnQueue(sampleBuffer)
         }
     }
@@ -210,9 +210,6 @@ private final class RecordingEngine: @unchecked Sendable {
         let relativeTime = CMTimeSubtract(validSourceTime, start)
         if relativeTime.isValid, relativeTime.isNumeric, CMTimeCompare(relativeTime, .zero) >= 0 {
             return relativeTime
-        }
-        if let lastVideoPresentationTime {
-            return CMTimeAdd(lastVideoPresentationTime, lastVideoDuration)
         }
         return .zero
     }
@@ -568,7 +565,6 @@ final class RecordingController {
     private var recordingDisplay: DisplayDescriptor?
     private var recordingSourceRect: CGRect?
     private let webcam: WebcamOverlayController
-    private var excludesWebcamFromScreenCapture = false
     private let sampleQueue = DispatchQueue(label: "com.zoomitmac.recorder.samples")
     private var clipEditor: VideoClipEditorController?
     var overlayFrameProvider: (@MainActor @Sendable (CGRect?) -> CGImage?)?
@@ -596,11 +592,6 @@ final class RecordingController {
             self.onStateChange = onStateChange
             start(region: region)
         }
-    }
-
-    func setWebcamExcludedFromScreenCapture(_ excluded: Bool) {
-        excludesWebcamFromScreenCapture = excluded
-        webcam.setExcludedFromScreenCapture(excluded)
     }
 
     var webcamWindowNumberForScreenCaptureExclusion: Int? {
@@ -645,7 +636,6 @@ final class RecordingController {
         Task { @MainActor in
             do {
                 await self.webcam.start(settings: self.settingsStore.load(), area: self.recordedArea(display: display, region: sourceRect))
-                self.webcam.setExcludedFromScreenCapture(self.excludesWebcamFromScreenCapture)
                 try await self.startStreaming(display: display, sourceRect: sourceRect)
                 self.isRecording = true
                 self.onStateChange?(true)
@@ -770,11 +760,7 @@ final class RecordingController {
         let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
         let output = RecordingStreamOutput(engine: engine, overlayFrameProvider: overlayFrameProvider.map { provider in
             { @MainActor @Sendable in
-                guard let overlayImage = provider(sourceRect) else {
-                    self.webcam.setExcludedFromScreenCapture(self.excludesWebcamFromScreenCapture)
-                    return nil
-                }
-                self.webcam.setExcludedFromScreenCapture(true)
+                guard let overlayImage = provider(sourceRect) else { return nil }
                 guard let webcamFrame = self.webcam.recordingSnapshot() else { return overlayImage }
                 return self.composite(webcamFrame, over: overlayImage, display: display, sourceRect: sourceRect)
             }
@@ -865,7 +851,6 @@ final class RecordingController {
         isRecording = false
         isFinalizingRecording = true
         hideBorder()
-        setWebcamExcludedFromScreenCapture(false)
 
         captureSession?.stopRunning()
         captureSession = nil
@@ -1048,7 +1033,6 @@ final class RecordingController {
         recordingSourceRect = nil
         isFinalizingRecording = false
         hideBorder()
-        setWebcamExcludedFromScreenCapture(false)
         webcam.stop()
         isRecording = false
     }
