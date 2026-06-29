@@ -559,6 +559,90 @@ public enum PanoramaStitcher {
         return (Double(total) / Double(count), count)
     }
 
+    static func coherentShiftSupport(prev: [UInt8], cur: [UInt8], w: Int, h: Int,
+                                     dx: Int, dy: Int,
+                                     ignoreTopRows: Int = 0, ignoreBottomRows: Int = 0) -> Bool {
+        guard prev.count == cur.count, w > 8, h > 8, dx != 0 || dy != 0 else { return false }
+        let x0 = max(1, -dx), x1 = min(w - 1, w - dx)
+        let y0 = max(max(max(1, -dy), ignoreTopRows), ignoreTopRows - dy)
+        let y1 = min(min(h - ignoreBottomRows - 1, h - dy), h - ignoreBottomRows - dy)
+        guard x1 > x0, y1 > y0 else { return false }
+
+        if abs(dy) >= abs(dx) {
+            let rowStep = 2
+            let xStep = 4
+            let sampledRows = max(1, (y1 - y0 + rowStep - 1) / rowStep)
+            let minSupportRows = max(8, sampledRows / 5)
+            let minRowSamples = max(6, (x1 - x0) / (xStep * 40))
+            var supportRows = 0
+
+            prev.withUnsafeBufferPointer { pp in
+                cur.withUnsafeBufferPointer { pc in
+                    var y = y0
+                    while y < y1 {
+                        var sameTotal = 0
+                        var shiftedTotal = 0
+                        var samples = 0
+                        let curRow = y * w
+                        let prevSameRow = y * w
+                        let prevShiftedRow = (y + dy) * w
+                        var x = x0
+                        while x < x1 {
+                            let curValue = Int(pc[curRow + x])
+                            let sameDiff = abs(curValue - Int(pp[prevSameRow + x]))
+                            if sameDiff > 8 {
+                                sameTotal += sameDiff
+                                shiftedTotal += abs(curValue - Int(pp[prevShiftedRow + x + dx]))
+                                samples += 1
+                            }
+                            x += xStep
+                        }
+                        if samples >= minRowSamples && shiftedTotal + max(10 * samples, sameTotal / 8) < sameTotal {
+                            supportRows += 1
+                        }
+                        y += rowStep
+                    }
+                }
+            }
+            return supportRows >= minSupportRows
+        }
+
+        let colStep = 2
+        let yStep = 4
+        let sampledCols = max(1, (x1 - x0 + colStep - 1) / colStep)
+        let minSupportCols = max(8, sampledCols / 5)
+        let minColSamples = max(6, (y1 - y0) / (yStep * 40))
+        var supportCols = 0
+
+        prev.withUnsafeBufferPointer { pp in
+            cur.withUnsafeBufferPointer { pc in
+                var x = x0
+                while x < x1 {
+                    var sameTotal = 0
+                    var shiftedTotal = 0
+                    var samples = 0
+                    var y = y0
+                    while y < y1 {
+                        let curIndex = y * w + x
+                        let curValue = Int(pc[curIndex])
+                        let sameDiff = abs(curValue - Int(pp[curIndex]))
+                        if sameDiff > 8 {
+                            sameTotal += sameDiff
+                            shiftedTotal += abs(curValue - Int(pp[(y + dy) * w + x + dx]))
+                            samples += 1
+                        }
+                        y += yStep
+                    }
+                    if samples >= minColSamples && shiftedTotal + max(10 * samples, sameTotal / 8) < sameTotal {
+                        supportCols += 1
+                    }
+                    x += colStep
+                }
+            }
+        }
+        return supportCols >= minSupportCols
+    }
+
     /// Full-resolution local SAD minimum around a coarse seed shift.
     static func refineWindow(prev: [UInt8], cur: [UInt8], w: Int, h: Int,
                              dxCenter: Int, dyCenter: Int, dxRadius: Int, dyRadius: Int,
@@ -679,7 +763,7 @@ public enum PanoramaStitcher {
     /// autocorrelation from locking a tall vertical panorama onto the horizontal
     /// axis, which creates horizontal smearing and little vertical growth.
     static func axisScan(prev: [UInt8], cur: [UInt8], w: Int, h: Int, ignoreTopRows: Int,
-                         lockedAxis: Axis? = nil) -> (axis: Axis, shift: Int)? {
+                         lockedAxis: Axis? = nil, center: Int? = nil, radius: Int? = nil) -> (axis: Axis, shift: Int)? {
         guard prev.count == cur.count, w > 8, h > 8 else { return nil }
         let pixelCount = w * h
         var prevGradient = [Bool](repeating: false, count: pixelCount)
@@ -721,21 +805,25 @@ public enum PanoramaStitcher {
             var samples = 0
             prev.withUnsafeBufferPointer { pp in
                 cur.withUnsafeBufferPointer { pc in
-                    var y = y0
-                    while y < y1 {
-                        let curRow = y * w
-                        let prevRow = (y + dy) * w
-                        var x = x0
-                        while x < x1 {
-                            let curIndex = curRow + x
-                            let prevIndex = prevRow + x + dx
-                            if !useGradientMask || prevGradient[prevIndex] || curGradient[curIndex] {
-                                total += abs(Int(pc[curIndex]) - Int(pp[prevIndex]))
-                                samples += 1
+                    prevGradient.withUnsafeBufferPointer { pg in
+                        curGradient.withUnsafeBufferPointer { cg in
+                            var y = y0
+                            while y < y1 {
+                                let curRow = y * w
+                                let prevRow = (y + dy) * w
+                                var x = x0
+                                while x < x1 {
+                                    let curIndex = curRow + x
+                                    let prevIndex = prevRow + x + dx
+                                    if !useGradientMask || pg[prevIndex] || cg[curIndex] {
+                                        total += abs(Int(pc[curIndex]) - Int(pp[prevIndex]))
+                                        samples += 1
+                                    }
+                                    x += sampleStep
+                                }
+                                y += sampleStep
                             }
-                            x += sampleStep
                         }
-                        y += sampleStep
                     }
                 }
             }
@@ -743,12 +831,19 @@ public enum PanoramaStitcher {
             return samples >= minSamples ? Double(total) / Double(samples) : nil
         }
 
-        func bestVertical(useGradientMask: Bool) -> (shift: Int, score: Double)? {
-            let span = 2 * scanRange + 1
+        func scanBounds(center: Int?, radius: Int?) -> (lo: Int, hi: Int) {
+            guard let center, let radius else { return (-scanRange, scanRange) }
+            return (max(-scanRange, center - radius), min(scanRange, center + radius))
+        }
+
+        func bestVertical(useGradientMask: Bool, center: Int? = nil, radius: Int? = nil) -> (shift: Int, score: Double)? {
+            let bounds = scanBounds(center: center, radius: radius)
+            guard bounds.lo <= bounds.hi else { return nil }
+            let span = bounds.hi - bounds.lo + 1
             var scores = [Double](repeating: Double.greatestFiniteMagnitude, count: span)
             scores.withUnsafeMutableBufferPointer { buf in
                 DispatchQueue.concurrentPerform(iterations: span) { i in
-                    let dy = i - scanRange
+                    let dy = bounds.lo + i
                     if dy == 0 { return }
                     if let candidate = score(dx: 0, dy: dy, useGradientMask: useGradientMask) {
                         buf[i] = candidate
@@ -760,18 +855,20 @@ public enum PanoramaStitcher {
             var found = false
             for i in 0..<span where scores[i] < bestScore {
                 bestScore = scores[i]
-                bestShift = i - scanRange
+                bestShift = bounds.lo + i
                 found = true
             }
             return found ? (bestShift, bestScore) : nil
         }
 
-        func bestHorizontal(useGradientMask: Bool) -> (shift: Int, score: Double)? {
-            let span = 2 * scanRange + 1
+        func bestHorizontal(useGradientMask: Bool, center: Int? = nil, radius: Int? = nil) -> (shift: Int, score: Double)? {
+            let bounds = scanBounds(center: center, radius: radius)
+            guard bounds.lo <= bounds.hi else { return nil }
+            let span = bounds.hi - bounds.lo + 1
             var scores = [Double](repeating: Double.greatestFiniteMagnitude, count: span)
             scores.withUnsafeMutableBufferPointer { buf in
                 DispatchQueue.concurrentPerform(iterations: span) { i in
-                    let dx = i - scanRange
+                    let dx = bounds.lo + i
                     if dx == 0 { return }
                     if let candidate = score(dx: dx, dy: 0, useGradientMask: useGradientMask) {
                         buf[i] = candidate
@@ -783,7 +880,7 @@ public enum PanoramaStitcher {
             var found = false
             for i in 0..<span where scores[i] < bestScore {
                 bestScore = scores[i]
-                bestShift = i - scanRange
+                bestShift = bounds.lo + i
                 found = true
             }
             return found ? (bestShift, bestScore) : nil
@@ -792,11 +889,17 @@ public enum PanoramaStitcher {
         // Once the axis is locked, only that direction is valid; a
         // perpendicular match is always spurious for a scrolling capture.
         if lockedAxis == .vertical {
-            guard let v = bestVertical(useGradientMask: true) ?? bestVertical(useGradientMask: false) else { return nil }
+            guard let v = bestVertical(useGradientMask: true, center: center, radius: radius) ??
+                    bestVertical(useGradientMask: false, center: center, radius: radius) ??
+                    bestVertical(useGradientMask: true) ??
+                    bestVertical(useGradientMask: false) else { return nil }
             return (.vertical, v.shift)
         }
         if lockedAxis == .horizontal {
-            guard let hh = bestHorizontal(useGradientMask: true) ?? bestHorizontal(useGradientMask: false) else { return nil }
+            guard let hh = bestHorizontal(useGradientMask: true, center: center, radius: radius) ??
+                    bestHorizontal(useGradientMask: false, center: center, radius: radius) ??
+                    bestHorizontal(useGradientMask: true) ??
+                    bestHorizontal(useGradientMask: false) else { return nil }
             return (.horizontal, hh.shift)
         }
 
@@ -974,74 +1077,45 @@ public enum PanoramaStitcher {
     /// the windowed correlation is weak (e.g. the user reversed direction).
     static func findShift(prevLuma: [UInt8], curLuma: [UInt8], w: Int, h: Int,
                           expected: (dx: Int, dy: Int)?, axis: Axis?) -> Shift? {
+        findShift(prevLuma: prevLuma, curLuma: curLuma, w: w, h: h,
+                  expected: expected, axis: axis,
+                  prevConstantFraction: nil, curConstantFraction: nil)
+    }
+
+    private static func findShift(prevLuma: [UInt8], curLuma: [UInt8], w: Int, h: Int,
+                                  expected: (dx: Int, dy: Int)?, axis: Axis?,
+                                  prevConstantFraction: Double?, curConstantFraction: Double?) -> Shift? {
         guard prevLuma.count == curLuma.count, w > 0, h > 0 else { return nil }
         let scale = min(w, h) >= 240 ? 4 : 2
-        let (dsPrev, dw, dh) = downsample(prevLuma, w, h, scale)
-        let (dsCur, _, _) = downsample(curLuma, w, h, scale)
+        let dw = max(1, w / scale)
+        let dh = max(1, h / scale)
         let ignoredTopRows = stationaryTopRows(prevLuma, curLuma, w, h)
         let ignoredBottomRows = stationaryBottomRows(prevLuma, curLuma, w, h)
-        let ignoredTopRowsDs = ignoredTopRows / scale
-        let ignoredBottomRowsDs = ignoredBottomRows / scale
         let minProgress = max(1, min(dw, dh) / 30)
 
         let stationary = sad(prev: prevLuma, cur: curLuma, w: w, h: h, dx: 0, dy: 0, step: scale,
                      ignoreTopRows: ignoredTopRows, ignoreBottomRows: ignoredBottomRows).score
-        let constantPair = constantContentFraction(prevLuma, w, h) > 0.58 &&
-            constantContentFraction(curLuma, w, h) > 0.58
+        let prevConstant = prevConstantFraction ?? constantContentFraction(prevLuma, w, h)
+        let curConstant = curConstantFraction ?? constantContentFraction(curLuma, w, h)
+        let constantPair = prevConstant > 0.58 && curConstant > 0.58
         let informative = constantPair ? informativeLumaDifference(prevLuma, curLuma, w, h) : (avgDiff: 0.0, count: 0)
         if stationary <= 2 && !(constantPair && informative.count > 0 && informative.avgDiff >= 1) {
             return nil
         }
 
-        func verticalCoarse(center: Int?, radius: Int?) -> (shift: Int, score: Double)? {
-            var prevDensity = rowEdgeDensity(dsPrev, dw, dh)
-            var curDensity = rowEdgeDensity(dsCur, dw, dh)
-            if ignoredTopRowsDs > 0 {
-                for y in 0..<min(dh, ignoredTopRowsDs) {
-                    prevDensity[y] = 0
-                    curDensity[y] = 0
-                }
+        func shiftImprovesStationary(_ score: Double, dx: Int, dy: Int) -> Bool {
+            guard score.isFinite, stationary.isFinite else { return false }
+            if stationary <= 1 {
+                return score + 0.25 < stationary || coherentShiftSupport(prev: prevLuma, cur: curLuma, w: w, h: h,
+                                                                          dx: dx, dy: dy,
+                                                                          ignoreTopRows: ignoredTopRows,
+                                                                          ignoreBottomRows: ignoredBottomRows)
             }
-            if ignoredBottomRowsDs > 0 {
-                let firstBottomRow = max(0, dh - ignoredBottomRowsDs)
-                for y in firstBottomRow..<dh {
-                    prevDensity[y] = 0
-                    curDensity[y] = 0
-                }
-            }
-            let maxShift = dh - max(4, dh / 8)
-            let lo: Int, hi: Int
-            if let center, let radius {
-                lo = max(-maxShift, center - radius)
-                hi = min(maxShift, center + radius)
-            } else {
-                lo = -maxShift; hi = maxShift
-            }
-            return bestShift1D(prev: prevDensity, cur: curDensity, lo: lo, hi: hi,
-                               minOverlap: max(8, dh / 4), minAbsShift: center == nil ? minProgress : 0)
-        }
-
-        func horizontalCoarse(center: Int?, radius: Int?) -> (shift: Int, score: Double)? {
-            let prevDensity = colEdgeDensity(dsPrev, dw, dh)
-            let curDensity = colEdgeDensity(dsCur, dw, dh)
-            let maxShift = dw - max(4, dw / 8)
-            let lo: Int, hi: Int
-            if let center, let radius {
-                lo = max(-maxShift, center - radius)
-                hi = min(maxShift, center + radius)
-            } else {
-                lo = -maxShift; hi = maxShift
-            }
-            return bestShift1D(prev: prevDensity, cur: curDensity, lo: lo, hi: hi,
-                               minOverlap: max(8, dw / 4), minAbsShift: center == nil ? minProgress : 0)
-        }
-
-        func finishVertical(_ coarse: (shift: Int, score: Double)) -> Shift? {
-            let refined = refineWindow(prev: prevLuma, cur: curLuma, w: w, h: h,
-                                       dxCenter: 0, dyCenter: coarse.shift * scale,
-                                       dxRadius: scale * 2, dyRadius: scale,
-                                       ignoreTopRows: ignoredTopRows, ignoreBottomRows: ignoredBottomRows)
-            return Shift(dx: 0, dy: refined.dy, axis: .vertical, score: coarse.score)
+            if score + 1.0 < stationary && score * 100 < stationary * 92 { return true }
+            return coherentShiftSupport(prev: prevLuma, cur: curLuma, w: w, h: h,
+                                        dx: dx, dy: dy,
+                                        ignoreTopRows: ignoredTopRows,
+                                        ignoreBottomRows: ignoredBottomRows)
         }
 
         func finishVertical(fullResolutionShift: Int, score: Double) -> Shift? {
@@ -1049,20 +1123,15 @@ public enum PanoramaStitcher {
                                        dxCenter: 0, dyCenter: fullResolutionShift,
                                        dxRadius: 0, dyRadius: max(1, scale),
                                        ignoreTopRows: ignoredTopRows, ignoreBottomRows: ignoredBottomRows)
+            guard shiftImprovesStationary(refined.score, dx: 0, dy: refined.dy) else { return nil }
             return Shift(dx: 0, dy: refined.dy, axis: .vertical, score: score)
-        }
-
-        func finishHorizontal(_ coarse: (shift: Int, score: Double)) -> Shift? {
-            let refined = refineWindow(prev: prevLuma, cur: curLuma, w: w, h: h,
-                                       dxCenter: coarse.shift * scale, dyCenter: 0,
-                                       dxRadius: scale, dyRadius: scale * 2)
-            return Shift(dx: refined.dx, dy: 0, axis: .horizontal, score: coarse.score)
         }
 
         func finishHorizontal(fullResolutionShift: Int, score: Double) -> Shift? {
             let refined = refineWindow(prev: prevLuma, cur: curLuma, w: w, h: h,
                                        dxCenter: fullResolutionShift, dyCenter: 0,
                                        dxRadius: max(1, scale), dyRadius: 0)
+            guard shiftImprovesStationary(refined.score, dx: refined.dx, dy: 0) else { return nil }
             return Shift(dx: refined.dx, dy: 0, axis: .horizontal, score: score)
         }
 
@@ -1087,31 +1156,54 @@ public enum PanoramaStitcher {
                                        dxCenter: 0, dyCenter: best.dy,
                                        dxRadius: 0, dyRadius: max(1, scale),
                                        ignoreTopRows: ignoredTopRows, ignoreBottomRows: ignoredBottomRows)
+            guard shiftImprovesStationary(refined.score, dx: 0, dy: refined.dy) else { return nil }
             return Shift(dx: 0, dy: refined.dy, axis: .vertical, score: 1.0)
         }
 
         if let axis {
             let exp = expected ?? (0, 0)
+            func isUsableWindowedShift(_ shift: Int, expected: Int) -> Bool {
+                guard abs(shift) >= max(minProgress, 2) else { return false }
+                let minimumUsefulShift = max(minProgress * scale, abs(expected) / 2)
+                if abs(shift) <= minimumUsefulShift { return false }
+                if expected != 0 && (shift > 0) != (expected > 0) { return false }
+                return true
+            }
+
             switch axis {
             case .vertical:
                 let radiusPx = max(minProgress * scale * 3, abs(exp.dy) / 2 + scale * 4)
-                if let shift = fixedHeaderVerticalShift(center: exp.dy, radius: radiusPx) {
+                if let shift = fixedHeaderVerticalShift(center: exp.dy, radius: radiusPx),
+                   isUsableWindowedShift(shift.dy, expected: exp.dy) {
                     return shift
                 }
                 // Global-minimum SAD scan on informative pixels finds the true
                 // shift even for fast scrolls; this avoids the harmonic aliasing
                 // that an edge-density NCC produces on repetitive text.
-                if let decision = axisScan(prev: prevLuma, cur: curLuma, w: w, h: h,
-                                           ignoreTopRows: ignoredTopRows, lockedAxis: .vertical),
-                   abs(decision.shift) >= max(minProgress, 2) {
-                    return finishVertical(fullResolutionShift: decision.shift, score: 1.0)
+                if let windowed = axisScan(prev: prevLuma, cur: curLuma, w: w, h: h,
+                                           ignoreTopRows: ignoredTopRows, lockedAxis: .vertical,
+                                           center: exp.dy, radius: radiusPx),
+                   isUsableWindowedShift(windowed.shift, expected: exp.dy) {
+                    return finishVertical(fullResolutionShift: windowed.shift, score: 1.0)
+                }
+                if let full = axisScan(prev: prevLuma, cur: curLuma, w: w, h: h,
+                                       ignoreTopRows: ignoredTopRows, lockedAxis: .vertical),
+                   isUsableWindowedShift(full.shift, expected: exp.dy) {
+                    return finishVertical(fullResolutionShift: full.shift, score: 1.0)
                 }
                 return nil
             case .horizontal:
-                if let decision = axisScan(prev: prevLuma, cur: curLuma, w: w, h: h,
-                                           ignoreTopRows: ignoredTopRows, lockedAxis: .horizontal),
-                   abs(decision.shift) >= max(minProgress, 2) {
-                    return finishHorizontal(fullResolutionShift: decision.shift, score: 1.0)
+                let radiusPx = max(minProgress * scale * 3, abs(exp.dx) / 2 + scale * 4)
+                if let windowed = axisScan(prev: prevLuma, cur: curLuma, w: w, h: h,
+                                           ignoreTopRows: ignoredTopRows, lockedAxis: .horizontal,
+                                           center: exp.dx, radius: radiusPx),
+                   isUsableWindowedShift(windowed.shift, expected: exp.dx) {
+                    return finishHorizontal(fullResolutionShift: windowed.shift, score: 1.0)
+                }
+                if let full = axisScan(prev: prevLuma, cur: curLuma, w: w, h: h,
+                                       ignoreTopRows: ignoredTopRows, lockedAxis: .horizontal),
+                   isUsableWindowedShift(full.shift, expected: exp.dx) {
+                    return finishHorizontal(fullResolutionShift: full.shift, score: 1.0)
                 }
                 return nil
             }
@@ -1157,6 +1249,7 @@ public enum PanoramaStitcher {
         // panorama top is sharp. Base on the second frame.
         var startIndex = frames.count > 12 ? 1 : 0
         var referenceLuma = luma(frames[startIndex])
+        var referenceConstantFraction = constantContentFraction(referenceLuma, w, h)
         var composedIndices = [startIndex]
         var origins: [(x: Int, y: Int)] = [(0, 0)]
         var steps: [(x: Int, y: Int)] = [(0, 0)]
@@ -1180,8 +1273,42 @@ public enum PanoramaStitcher {
             progress?(5 + i * 85 / frames.count)
             guard frames[i].width == w, frames[i].height == h else { continue }
             let curLuma = luma(frames[i])
-            guard let shift = findShift(prevLuma: referenceLuma, curLuma: curLuma, w: w, h: h,
-                                        expected: expected, axis: axis) else { continue }
+            let curConstantFraction = constantContentFraction(curLuma, w, h)
+            let searchAxis = directionConfirmed ? axis : nil
+            var nextExpectedOverride: (dx: Int, dy: Int)?
+            var shift = findShift(prevLuma: referenceLuma, curLuma: curLuma, w: w, h: h,
+                                  expected: expected, axis: searchAxis,
+                                  prevConstantFraction: referenceConstantFraction,
+                                  curConstantFraction: curConstantFraction)
+            if shift == nil,
+               directionConfirmed,
+               let axis,
+               let expected,
+               i > startIndex + 1,
+               frames[i - 1].width == w,
+               frames[i - 1].height == h {
+                let previousCapturedLuma = luma(frames[i - 1])
+                if let adjacent = findShift(prevLuma: previousCapturedLuma, curLuma: curLuma, w: w, h: h,
+                                            expected: expected, axis: axis) {
+                    let expectedPrimary = axis == .horizontal ? expected.dx : expected.dy
+                    let adjacentPrimary = axis == .horizontal ? adjacent.dx : adjacent.dy
+                    let adjacentAbs = abs(adjacentPrimary)
+                    let sameDirection = expectedPrimary == 0 || adjacentPrimary == 0 || (expectedPrimary > 0) == (adjacentPrimary > 0)
+                    let minRecoveredStep = max(4, minProgress / 2)
+                    let maxRecoveredStep = min(axis == .horizontal ? w - minProgress : h - minProgress,
+                                               max(abs(expectedPrimary) * 2, minProgress * 6))
+                    if sameDirection && adjacentAbs >= minRecoveredStep && adjacentAbs <= maxRecoveredStep {
+                        let gap = max(1, i - composedIndices[composedIndices.count - 1])
+                        let maxTotal = axis == .horizontal ? w - minProgress : h - minProgress
+                        let recoveredPrimary = max(-maxTotal, min(maxTotal, adjacentPrimary * gap))
+                        shift = axis == .horizontal
+                            ? Shift(dx: recoveredPrimary, dy: 0, axis: .horizontal, score: adjacent.score)
+                            : Shift(dx: 0, dy: recoveredPrimary, axis: .vertical, score: adjacent.score)
+                        nextExpectedOverride = (adjacent.dx, adjacent.dy)
+                    }
+                }
+            }
+            guard let shift else { continue }
             if shift.dx == 0 && shift.dy == 0 { continue }
 
             let primary = shift.axis == .horizontal ? shift.dx : shift.dy
@@ -1211,6 +1338,7 @@ public enum PanoramaStitcher {
                     // stitching one way then switching.
                     let pivot = composedIndices[composedIndices.count - 1]
                     referenceLuma = luma(frames[pivot])
+                    referenceConstantFraction = constantContentFraction(referenceLuma, w, h)
                     origins = [(0, 0)]
                     steps = [(0, 0)]
                     composedIndices = [pivot]
@@ -1229,9 +1357,10 @@ public enum PanoramaStitcher {
             origins.append((x: last.x + shift.dx, y: last.y + shift.dy))
             steps.append((x: shift.dx, y: shift.dy))
             composedIndices.append(i)
-            expected = (shift.dx, shift.dy)
+            expected = nextExpectedOverride ?? (shift.dx, shift.dy)
             acceptedSteps.append(absStep)
             referenceLuma = curLuma
+            referenceConstantFraction = curConstantFraction
             if ProcessInfo.processInfo.environment["ZOOMIT_PANO_LOG"] != nil {
                 FileHandle.standardError.write("accept i=\(i) dx=\(shift.dx) dy=\(shift.dy)\n".data(using: .utf8)!)
             }
@@ -1248,12 +1377,9 @@ public enum PanoramaStitcher {
         let canvasH = maxY - minY
         guard canvasW > 0, canvasH > 0 else { return nil }
 
-        // Composite onto the canvas. Rather than letting each frame overwrite
-        // the entire overlap (which double-exposes slightly-misaligned text and
-        // leaves visible seams), keep the first frame to cover a pixel and only
-        // write genuinely new content. Along the dominant scroll axis a narrow
-        // "feather" band linearly crossfades old↔new at the seam so the join is
-        // invisible. This mirrors the Windows compositor's feather blend.
+        // Composite onto the canvas using the Windows panorama model: pixels in
+        // the deep overlap keep the old canvas, the new strip uses the new
+        // frame, and a narrow seam band feathers between them.
         var canvas = [UInt8](repeating: 0, count: canvasW * canvasH * 4)
         var written = [Bool](repeating: false, count: canvasW * canvasH)
         let resolvedAxis = axis ?? .vertical
@@ -1277,6 +1403,8 @@ public enum PanoramaStitcher {
                     suppressTopRows: k == 0 ? 0 : fixedTopHeaderHeight,
                     suppressBottomRows: k == composedIndices.count - 1 ? 0 : fixedBottomFooterHeight)
         }
+
+        repairUnwrittenPixels(dst: &canvas, written: &written, dstW: canvasW, dstH: canvasH)
 
         progress?(100)
         return Frame(width: canvasW, height: canvasH, pixels: canvas)
@@ -1319,17 +1447,16 @@ public enum PanoramaStitcher {
                         if dy < 0 || dy >= dstH { return }
                         let srcRow = y * srcW * 4
                         let dstRowPx = dy * dstW
-                        // Vertical scroll: newest frame wins (hard overwrite).
-                        // Later captures of a region are sharper; early frames
-                        // are mid-scroll/settling and motion-blurred. The top is
-                        // covered by the most frames, so overwriting with the
-                        // newest pixels keeps it sharp.
+                        // Vertical scroll uses keep-first (the first frame to
+                        // cover a pixel wins): later frames only fill their new
+                        // strip. Unlike Windows -- whose fine matcher reaches
+                        // near-perfect sub-pixel alignment and can afford a seam
+                        // feather -- the Mac matcher is coarser, so blending the
+                        // overlap ghosts slightly-misaligned text into a visible
+                        // dark band. Keep-first always takes a single frame's
+                        // pixels per canvas pixel, so text stays sharp. Genuine
+                        // unwritten gaps are filled afterward by repairUnwrittenPixels.
                         if axis == .vertical {
-                            // Write only genuinely-new pixels: first frame to
-                            // cover a pixel wins (keep-first). Later frames only
-                            // fill their new strip, so already-shown top rows are
-                            // never overwritten with newer (different) content —
-                            // that overwrite is what tiles the top.
                             if originX == 0 && srcW == dstW {
                                 if !pw[dstRowPx] {
                                     pd.baseAddress!.advanced(by: dstRowPx * 4)
@@ -1378,6 +1505,63 @@ public enum PanoramaStitcher {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    private static func repairUnwrittenPixels(dst: inout [UInt8], written: inout [Bool], dstW: Int, dstH: Int) {
+        guard dstW > 0, dstH > 0, dst.count == dstW * dstH * 4, written.count == dstW * dstH else { return }
+        for x in 0..<dstW {
+            var y = 0
+            while y < dstH {
+                let pixelIndex = y * dstW + x
+                if written[pixelIndex] {
+                    y += 1
+                    continue
+                }
+
+                let runStart = y
+                while y < dstH && !written[y * dstW + x] {
+                    y += 1
+                }
+                let runEnd = y - 1
+
+                var aboveY = runStart - 1
+                while aboveY >= 0 && !written[aboveY * dstW + x] {
+                    aboveY -= 1
+                }
+                var belowY = runEnd + 1
+                while belowY < dstH && !written[belowY * dstW + x] {
+                    belowY += 1
+                }
+
+                let hasAbove = aboveY >= 0
+                let hasBelow = belowY < dstH
+                if !hasAbove && !hasBelow { continue }
+
+                for fillY in runStart...runEnd {
+                    let fillPixelIndex = fillY * dstW + x
+                    let fillColorIndex = fillPixelIndex * 4
+                    if hasAbove && hasBelow && belowY > aboveY {
+                        let numerator = fillY - aboveY
+                        let denominator = belowY - aboveY
+                        let aboveColorIndex = (aboveY * dstW + x) * 4
+                        let belowColorIndex = (belowY * dstW + x) * 4
+                        for channel in 0..<3 {
+                            let above = Int(dst[aboveColorIndex + channel])
+                            let below = Int(dst[belowColorIndex + channel])
+                            dst[fillColorIndex + channel] = UInt8((above * (denominator - numerator) + below * numerator) / max(1, denominator))
+                        }
+                    } else {
+                        let sourceY = hasAbove ? aboveY : belowY
+                        let sourceColorIndex = (sourceY * dstW + x) * 4
+                        dst[fillColorIndex] = dst[sourceColorIndex]
+                        dst[fillColorIndex + 1] = dst[sourceColorIndex + 1]
+                        dst[fillColorIndex + 2] = dst[sourceColorIndex + 2]
+                    }
+                    dst[fillColorIndex + 3] = 255
+                    written[fillPixelIndex] = true
                 }
             }
         }

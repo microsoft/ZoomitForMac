@@ -65,6 +65,8 @@ struct AppSettings: Equatable {
     var recordSystemAudio: Bool
     /// Whether to capture microphone audio in recordings.
     var recordMicrophone: Bool
+    /// Whether to request capture-side microphone noise reduction when available.
+    var recordNoiseCancellation: Bool
     /// The unique ID of the microphone device to record, or empty for the
     /// system default input.
     var microphoneDeviceID: String
@@ -130,6 +132,7 @@ struct AppSettings: Equatable {
         breakBackgroundFile: "",
         recordSystemAudio: false,
         recordMicrophone: false,
+        recordNoiseCancellation: true,
         microphoneDeviceID: "",
         webcamEnabled: false,
         webcamDeviceID: "",
@@ -182,6 +185,7 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let breakBackgroundFile = "breakBackgroundFile"
         static let recordSystemAudio = "recordSystemAudio"
         static let recordMicrophone = "recordMicrophone"
+        static let recordNoiseCancellation = "recordNoiseCancellation"
         static let microphoneDeviceID = "microphoneDeviceID"
         static let webcamEnabled = "webcamEnabled"
         static let webcamDeviceID = "webcamDeviceID"
@@ -347,6 +351,10 @@ final class UserDefaultsSettingsStore: SettingsStore {
             settings.recordMicrophone = defaults.bool(forKey: Key.recordMicrophone)
         }
 
+        if defaults.object(forKey: Key.recordNoiseCancellation) != nil {
+            settings.recordNoiseCancellation = defaults.bool(forKey: Key.recordNoiseCancellation)
+        }
+
         if let micID = defaults.string(forKey: Key.microphoneDeviceID) {
             settings.microphoneDeviceID = micID
         }
@@ -411,6 +419,7 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(settings.breakBackgroundFile, forKey: Key.breakBackgroundFile)
         defaults.set(settings.recordSystemAudio, forKey: Key.recordSystemAudio)
         defaults.set(settings.recordMicrophone, forKey: Key.recordMicrophone)
+        defaults.set(settings.recordNoiseCancellation, forKey: Key.recordNoiseCancellation)
         defaults.set(settings.microphoneDeviceID, forKey: Key.microphoneDeviceID)
         defaults.set(settings.webcamEnabled, forKey: Key.webcamEnabled)
         defaults.set(settings.webcamDeviceID, forKey: Key.webcamDeviceID)

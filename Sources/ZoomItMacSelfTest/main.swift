@@ -84,6 +84,61 @@ if args.count >= 3, args[1] == "--shifts" {
     Foundation.exit(EXIT_SUCCESS)
 }
 
+if args.count >= 2, args[1] == "--bench-stitch" {
+    let width = args.count > 2 ? (Int(args[2]) ?? 1200) : 1200
+    let frameHeight = args.count > 3 ? (Int(args[3]) ?? 900) : 900
+    let frameCount = args.count > 4 ? (Int(args[4]) ?? 80) : 80
+    let scrollPerFrame = args.count > 5 ? (Int(args[5]) ?? 90) : 90
+    let iterations = args.count > 6 ? (Int(args[6]) ?? 1) : 1
+    let documentHeight = frameHeight + scrollPerFrame * max(0, frameCount - 1)
+
+    func documentPixel(x: Int, y: Int) -> (UInt8, UInt8, UInt8) {
+        var hash = UInt32(x / 3) &* 747_796_405 &+ UInt32(y) &* 2_891_336_453 &+ 97
+        hash = ((hash >> ((hash >> 28) + 4)) ^ hash) &* 277_803_737
+        hash = (hash >> 22) ^ hash
+        let textLine = y % 23 < 4 || (x + y * 5) % 61 < 7
+        let block = (x / 180 + y / 120).isMultiple(of: 3)
+        let boost = textLine ? 80 : (block ? 24 : 0)
+        return (
+            UInt8(clamping: 30 + Int((hash >> 16) & 0x7F) / 2 + boost),
+            UInt8(clamping: 36 + Int((hash >> 8) & 0x7F) / 2 + boost),
+            UInt8(clamping: 42 + Int(hash & 0x7F) / 2 + boost)
+        )
+    }
+
+    func makeFrame(topRow: Int) -> PanoramaStitcher.Frame {
+        var pixels = [UInt8](repeating: 0, count: width * frameHeight * 4)
+        for y in 0..<frameHeight {
+            let docY = topRow + y
+            for x in 0..<width {
+                let pixel = documentPixel(x: x, y: docY)
+                let i = (y * width + x) * 4
+                pixels[i] = pixel.0
+                pixels[i + 1] = pixel.1
+                pixels[i + 2] = pixel.2
+                pixels[i + 3] = 255
+            }
+        }
+        return PanoramaStitcher.Frame(width: width, height: frameHeight, pixels: pixels)
+    }
+
+    let frames = (0..<frameCount).map { makeFrame(topRow: $0 * scrollPerFrame) }
+    print("Bench stitch frames=\(frameCount) frame=\(width)x\(frameHeight) step=\(scrollPerFrame) docHeight=\(documentHeight) iterations=\(iterations)")
+    let start = DispatchTime.now().uptimeNanoseconds
+    var stitchedSize = "nil"
+    for _ in 0..<max(1, iterations) {
+        if let stitched = PanoramaStitcher.stitch(frames: frames) {
+            stitchedSize = "\(stitched.width)x\(stitched.height)"
+        } else {
+            stitchedSize = "nil"
+        }
+    }
+    let end = DispatchTime.now().uptimeNanoseconds
+    let elapsedMs = Double(end - start) / 1_000_000
+    print(String(format: "Bench stitched=%@ elapsedMs=%.1f avgMs=%.1f", stitchedSize, elapsedMs, elapsedMs / Double(max(1, iterations))))
+    Foundation.exit(EXIT_SUCCESS)
+}
+
 Task { @MainActor in
     do {
         try SelfTestRunner.run()

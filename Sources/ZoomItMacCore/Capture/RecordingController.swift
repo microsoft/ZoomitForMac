@@ -151,6 +151,7 @@ private final class RecordingEngine: @unchecked Sendable {
         queue.async {
             guard self.sessionStarted, !self.finished, self.writer.status == .writing,
                   let input = self.systemAudioInput, input.isReadyForMoreMediaData,
+                  self.hasNonZeroAudioSamples(box.buffer),
                   let sampleBuffer = self.retimedSampleBuffer(box.buffer) else { return }
             input.append(sampleBuffer)
         }
@@ -160,6 +161,7 @@ private final class RecordingEngine: @unchecked Sendable {
         queue.async {
             guard self.sessionStarted, !self.finished, self.writer.status == .writing,
                   let input = self.micInput, input.isReadyForMoreMediaData,
+                  self.hasNonZeroAudioSamples(box.buffer),
                   let sampleBuffer = self.retimedSampleBuffer(box.buffer) else { return }
             input.append(sampleBuffer)
         }
@@ -248,6 +250,27 @@ private final class RecordingEngine: @unchecked Sendable {
             sampleBufferOut: &retimed
         ) == noErr else { return nil }
         return retimed
+    }
+
+    private func hasNonZeroAudioSamples(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              CMFormatDescriptionGetMediaType(formatDescription) == kCMMediaType_Audio,
+              let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return true }
+        let length = CMBlockBufferGetDataLength(blockBuffer)
+        guard length > 0 else { return false }
+
+        var data = Data(count: length)
+        let status = data.withUnsafeMutableBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return kCMBlockBufferBadPointerParameterErr }
+            return CMBlockBufferCopyDataBytes(
+                blockBuffer,
+                atOffset: 0,
+                dataLength: length,
+                destination: baseAddress
+            )
+        }
+        guard status == noErr else { return true }
+        return data.contains { $0 != 0 }
     }
 
     private func effectiveDuration(for sampleBuffer: CMSampleBuffer) -> CMTime {
@@ -777,7 +800,7 @@ final class RecordingController {
 
         // macOS 14 fallback: capture the microphone via AVCaptureSession.
         if wantsMic, !micViaSCStream, let device = AudioDevices.microphone(forID: settings.microphoneDeviceID) {
-            try? setupMicrophone(device: device, engine: engine)
+            try? setupMicrophone(device: device, noiseCancellation: settings.recordNoiseCancellation, engine: engine)
         }
 
         try await stream.startCapture()
@@ -833,9 +856,17 @@ final class RecordingController {
         return context.makeImage() ?? overlayImage
     }
 
-    private func setupMicrophone(device: AVCaptureDevice, engine: RecordingEngine) throws {
+    private func setupMicrophone(device: AVCaptureDevice, noiseCancellation: Bool, engine: RecordingEngine) throws {
         let session = AVCaptureSession()
         let input = try AVCaptureDeviceInput(device: device)
+        if noiseCancellation, #available(macOS 15.0, *) {
+            if input.isMultichannelAudioModeSupported(.stereo) {
+                input.multichannelAudioMode = .stereo
+            }
+            if input.isWindNoiseRemovalSupported {
+                input.isWindNoiseRemovalEnabled = true
+            }
+        }
         if session.canAddInput(input) { session.addInput(input) }
         let output = AVCaptureAudioDataOutput()
         let micOut = RecordingMicOutput(engine: engine)

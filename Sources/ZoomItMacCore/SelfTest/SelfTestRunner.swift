@@ -27,14 +27,18 @@ public enum SelfTestRunner {
         try testBreakTimerLayout()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
+        try testPanoramaVerticalSeamKeepsSingleFrame()
         try testPanoramaDeferredDirectionCommit()
         try testPanoramaNoHarmonicRepeats()
         try testPanoramaFixedHeaderSuppression()
         try testPanoramaFooterDoesNotAttractSmallShift()
         try testPanoramaFixedFooterSuppression()
         try testPanoramaSkipsRepeatedCaptures()
+        try testPanoramaRejectsStationaryRepaintShift()
+        try testPanoramaKeepsScrollBesideStaticContent()
         try testPanoramaSparseTallContentStitches()
         try testPanoramaStartupAxisRejectsHorizontalAlias()
+        try testPanoramaLockedAxisRejectsShortFallback()
     }
 
     private static func testViewportClampsZoom() throws {
@@ -415,6 +419,68 @@ public enum SelfTestRunner {
         }
         try expect(blurryTop == 0,
                    "Expected sharp top from single frame; \(blurryTop)/\(checked) off")
+    }
+
+    /// Vertical seams must use keep-first (a single source frame per canvas
+    /// pixel), never an overlap blend. A feather blend ghosts slightly-
+    /// misaligned text into a dark band -- the strikethrough artifact seen on
+    /// real captures. This drives content whose flat background brightness is
+    /// unique per frame, then asserts the stitched output only ever contains
+    /// exact source values, never an averaged (blended) intermediate.
+    private static func testPanoramaVerticalSeamKeepsSingleFrame() throws {
+        let width = 140
+        let frameHeight = 220
+        let scrollPerFrame = 44
+        let frameCount = 4
+        let documentHeight = frameHeight + scrollPerFrame * (frameCount - 1)
+
+        // Per-frame background brightness, spaced by 10 so an averaged blend of
+        // any two adjacent frames (e.g. 217) is never itself a valid source.
+        let backgrounds = [UInt8](arrayLiteral: 222, 212, 202, 192)
+        let bandShade: UInt8 = 24
+
+        func isBand(_ docY: Int) -> Bool {
+            var hash = UInt32(truncatingIfNeeded: docY) &* 2_654_435_761
+            hash ^= hash >> 15
+            return (hash & 0xFF) < 22
+        }
+
+        func makeFrame(index: Int) -> PanoramaStitcher.Frame {
+            let background = backgrounds[index]
+            let topRow = index * scrollPerFrame
+            var pixels = [UInt8](repeating: 0, count: width * frameHeight * 4)
+            for y in 0..<frameHeight {
+                let docY = topRow + y
+                let shade: UInt8 = isBand(docY) ? bandShade : background
+                for x in 0..<width {
+                    let i = (y * width + x) * 4
+                    pixels[i] = shade
+                    pixels[i + 1] = shade
+                    pixels[i + 2] = shade
+                    pixels[i + 3] = 255
+                }
+            }
+            return PanoramaStitcher.Frame(width: width, height: frameHeight, pixels: pixels)
+        }
+
+        let frames = (0..<frameCount).map { makeFrame(index: $0) }
+        guard let stitched = PanoramaStitcher.stitch(frames: frames) else {
+            throw SelfTestError.failure("Vertical-seam panorama stitching returned no image")
+        }
+        try expect(abs(stitched.height - documentHeight) <= 6,
+                   "Expected vertical-seam stitched height ~\(documentHeight), got \(stitched.height)")
+
+        let allowed: Set<Int> = [Int(bandShade), 222, 212, 202, 192]
+        var blendedPixels = 0
+        var checked = 0
+        let sampleX = width / 2
+        for y in 0..<stitched.height {
+            let value = Int(stitched.pixels[(y * stitched.width + sampleX) * 4])
+            if !allowed.contains(value) { blendedPixels += 1 }
+            checked += 1
+        }
+        try expect(blendedPixels == 0,
+                   "Expected keep-first vertical seams (no blended intermediates); \(blendedPixels)/\(checked) blended")
     }
 
     /// Captures often start before scrolling: a tiny pre-scroll jitter (mouse
@@ -828,6 +894,101 @@ public enum SelfTestRunner {
                    "Expected repeated-capture stitched height ~\(documentHeight), got \(stitched.height)")
     }
 
+    private static func testPanoramaRejectsStationaryRepaintShift() throws {
+        let width = 320
+        let frameHeight = 240
+
+        func documentPixel(x: Int, y: Int) -> (UInt8, UInt8, UInt8) {
+            let line = y % 17 < 4 || (x + y * 3) % 47 < 9
+            var hash = UInt32(x) &* 1_664_525 &+ UInt32(y) &* 1_013_904_223
+            hash ^= hash >> 13
+            let shade = UInt8((hash & 0x3F) + (line ? 34 : 160))
+            return (shade, shade, UInt8(clamping: Int(shade) + (line ? 30 : 0)))
+        }
+
+        func makeFrame(repaintVariant: Int) -> PanoramaStitcher.Frame {
+            var pixels = [UInt8](repeating: 0, count: width * frameHeight * 4)
+            for y in 0..<frameHeight {
+                for x in 0..<width {
+                    var pixel = documentPixel(x: x, y: y)
+                    if repaintVariant > 0 && x >= 210 && x < 302 && y >= 36 && y < 92 {
+                        pixel = repaintVariant.isMultiple(of: 2) ? (240, 32, 32) : (32, 160, 240)
+                    }
+                    let i = (y * width + x) * 4
+                    pixels[i] = pixel.0
+                    pixels[i + 1] = pixel.1
+                    pixels[i + 2] = pixel.2
+                    pixels[i + 3] = 255
+                }
+            }
+            return PanoramaStitcher.Frame(width: width, height: frameHeight, pixels: pixels)
+        }
+
+        let first = makeFrame(repaintVariant: 0)
+        let repaint = makeFrame(repaintVariant: 1)
+        let firstLuma = PanoramaStitcher.luma(first)
+        let repaintLuma = PanoramaStitcher.luma(repaint)
+        let shift = PanoramaStitcher.findShift(prevLuma: firstLuma,
+                                               curLuma: repaintLuma,
+                                               w: width, h: frameHeight,
+                                               expected: (dx: 0, dy: 40), axis: .vertical)
+        try expect(shift == nil,
+                   "Expected stationary repaint not to be forced into a panorama shift, got \(String(describing: shift))")
+    }
+
+    private static func testPanoramaKeepsScrollBesideStaticContent() throws {
+        let width = 840
+        let frameHeight = 360
+        let movingWidth = 310
+        let scrollPerFrame = 90
+
+        func movingPixel(x: Int, y: Int) -> UInt8 {
+            let card = y / 74
+            let line = y % 74
+            let left = 24 + (card % 3) * 9
+            let textWidth = 150 + (card * 31 % 104)
+            let onText = (12...15).contains(line) || (28...31).contains(line) || (44...47).contains(line)
+            let glyph = onText && x >= left && x < min(movingWidth - 18, left + textWidth) && ((x * 5 + y * 7) % 19) < 12
+            if glyph { return UInt8(36 + ((x * 3 + y * 5) & 0x1F)) }
+            if line >= 3 && line <= 56 && x >= 12 && x < movingWidth - 12 { return 238 }
+            return 248
+        }
+
+        func staticPixel(x: Int, y: Int) -> UInt8 {
+            let localX = x - movingWidth
+            let block = (localX / 96 + y / 88) % 4
+            let bevel = abs((localX % 96) - 48) / 5 + abs((y % 88) - 44) / 6
+            let shade = 205 - block * 18 - min(36, bevel)
+            return UInt8(max(116, min(232, shade)))
+        }
+
+        func makeFrame(topRow: Int) -> PanoramaStitcher.Frame {
+            var pixels = [UInt8](repeating: 0, count: width * frameHeight * 4)
+            for y in 0..<frameHeight {
+                for x in 0..<width {
+                    let shade = x < movingWidth ? movingPixel(x: x, y: topRow + y) : staticPixel(x: x, y: y)
+                    let i = (y * width + x) * 4
+                    pixels[i] = shade
+                    pixels[i + 1] = shade
+                    pixels[i + 2] = shade
+                    pixels[i + 3] = 255
+                }
+            }
+            return PanoramaStitcher.Frame(width: width, height: frameHeight, pixels: pixels)
+        }
+
+        let first = makeFrame(topRow: 0)
+        let second = makeFrame(topRow: scrollPerFrame)
+        let firstLuma = PanoramaStitcher.luma(first)
+        let secondLuma = PanoramaStitcher.luma(second)
+        let shift = PanoramaStitcher.findShift(prevLuma: firstLuma,
+                               curLuma: secondLuma,
+                                               w: width, h: frameHeight,
+                                               expected: (dx: 0, dy: scrollPerFrame), axis: .vertical)
+        try expect(abs((shift?.dy ?? 0) - scrollPerFrame) <= 4,
+               "Expected scroll beside static content to keep dy ~\(scrollPerFrame), got \(String(describing: shift))")
+    }
+
     /// Real chat/document captures can be mostly white space with sparse text.
     /// Raw pixel-change fractions stay low even while the document scrolls a
     /// long way, so duplicate filtering must not collapse the panorama to the
@@ -957,6 +1118,48 @@ public enum SelfTestRunner {
         try expect(stitched.width == width, "Expected horizontal-alias stitched width \(width), got \(stitched.width)")
         try expect(abs(stitched.height - documentHeight) <= 8,
                    "Expected horizontal-alias stitched height ~\(documentHeight), got \(stitched.height)")
+    }
+
+    private static func testPanoramaLockedAxisRejectsShortFallback() throws {
+        let width = 260
+        let frameHeight = 300
+        let actualStep = 30
+        let expectedStep = 90
+
+        func documentPixel(x: Int, y: Int) -> (UInt8, UInt8, UInt8) {
+            let line = y % 31 < 7 || (x * 3 + y * 5) % 67 < 10
+            var hash = UInt32(x) &* 747_796_405 &+ UInt32(y) &* 2_891_336_453 &+ 97
+            hash = ((hash >> ((hash >> 28) + 4)) ^ hash) &* 277_803_737
+            hash = (hash >> 22) ^ hash
+            let base = line ? 48 : 220
+            return (UInt8(base + Int((hash >> 16) & 0x1F)),
+                    UInt8(base + Int((hash >> 8) & 0x1F)),
+                    UInt8(base + Int(hash & 0x1F)))
+        }
+
+        func makeFrame(topRow: Int) -> PanoramaStitcher.Frame {
+            var pixels = [UInt8](repeating: 0, count: width * frameHeight * 4)
+            for y in 0..<frameHeight {
+                for x in 0..<width {
+                    let p = documentPixel(x: x, y: topRow + y)
+                    let i = (y * width + x) * 4
+                    pixels[i] = p.0
+                    pixels[i + 1] = p.1
+                    pixels[i + 2] = p.2
+                    pixels[i + 3] = 255
+                }
+            }
+            return PanoramaStitcher.Frame(width: width, height: frameHeight, pixels: pixels)
+        }
+
+        let first = makeFrame(topRow: 0)
+        let shortStep = makeFrame(topRow: actualStep)
+        let shift = PanoramaStitcher.findShift(prevLuma: PanoramaStitcher.luma(first),
+                                               curLuma: PanoramaStitcher.luma(shortStep),
+                                               w: width, h: frameHeight,
+                                               expected: (dx: 0, dy: expectedStep), axis: .vertical)
+        try expect(shift == nil,
+                   "Expected locked-axis full fallback to reject short harmonic step, got \(String(describing: shift))")
     }
 
     private static func makeFrame() throws -> CapturedFrame {

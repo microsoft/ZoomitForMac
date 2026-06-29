@@ -202,18 +202,29 @@ final class PanoramaController {
             let frameBytes = configuration.width * configuration.height * 4
             var totalBytes = 0
 
+            @MainActor func appendFrameIfNew(_ frame: PanoramaStitcher.Frame) {
+                if frames.isEmpty || !PanoramaStitcher.isNearDuplicate(frames[frames.count - 1], frame) {
+                    frames.append(frame)
+                    totalBytes += frameBytes
+                    updateBanner(captureText(frameCount: frames.count))
+                }
+            }
+
             while !stopRequested && frames.count < maxFrames && totalBytes + frameBytes <= maxFrameBytes {
                 let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
                 if let image, let frame = Self.makeFrame(from: image) {
-                    if frames.isEmpty || !PanoramaStitcher.isNearDuplicate(frames[frames.count - 1], frame) {
-                        frames.append(frame)
-                        totalBytes += frameBytes
-                        updateBanner(captureText(frameCount: frames.count))
-                    }
+                    appendFrameIfNew(frame)
                 }
-                // ~30 fps: fast enough for manual scrolling without flooding
-                // memory with near-identical frames.
-                try? await Task.sleep(nanoseconds: 33_000_000)
+                // Match Windows' ~16 ms cadence; duplicate filtering and memory
+                // caps keep the retained frame set bounded.
+                try? await Task.sleep(nanoseconds: 16_000_000)
+            }
+
+            if stopRequested && frames.count < maxFrames && totalBytes + frameBytes <= maxFrameBytes {
+                let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+                if let image, let frame = Self.makeFrame(from: image) {
+                    appendFrameIfNew(frame)
+                }
             }
 
             // Capture finished: drop the live border, switch the banner to a
@@ -222,7 +233,7 @@ final class PanoramaController {
             borderWindow?.orderOut(nil)
             borderWindow = nil
             onStateChange?(false)
-            updateBanner("ZoomIt stitching...")
+            updateBanner("ZoomIt panorama stitching...")
 
             // Optional: dump raw frames for offline algorithm debugging when
             // ZOOMIT_PANORAMA_DUMP is set. Each file is width,height-prefixed
@@ -429,7 +440,7 @@ final class PanoramaController {
         guard let display = captureDisplay else { return }
         let window = makeProgressWindow(onCancel: onCancel)
 
-        let label = NSTextField(labelWithString: "ZoomIt stitching...")
+        let label = NSTextField(labelWithString: "ZoomIt panorama stitching...")
         label.font = .systemFont(ofSize: 14, weight: .medium)
         label.textColor = .white
         label.sizeToFit()
