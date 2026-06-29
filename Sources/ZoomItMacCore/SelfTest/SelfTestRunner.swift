@@ -24,6 +24,7 @@ public enum SelfTestRunner {
         try testTypingAnnotations()
         try testAnnotationRenderingTouchesPixels()
         try testSettingsRoundTrip()
+        try testBreakTimerLayout()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
         try testPanoramaDeferredDirectionCommit()
@@ -232,6 +233,19 @@ public enum SelfTestRunner {
         settings.recordHotKeyModifiers = NSEvent.ModifierFlags([.control, .command]).rawValue
         settings.panoramaHotKeyCode = 28
         settings.panoramaHotKeyModifiers = NSEvent.ModifierFlags([.control, .shift]).rawValue
+        settings.breakHotKeyCode = 20
+        settings.breakHotKeyModifiers = NSEvent.ModifierFlags([.command, .option]).rawValue
+        settings.breakDurationMinutes = 25
+        settings.breakTextColorRGB = 0x00FF00
+        settings.breakBackgroundColorRGB = 0x000000
+        settings.breakTimerPosition = 8
+        settings.breakOpacity = 70
+        settings.breakShowExpiredTime = false
+        settings.breakPlaySound = true
+        settings.breakSoundFile = "/tmp/break.wav"
+        settings.breakBackgroundMode = 2
+        settings.breakBackgroundStretch = true
+        settings.breakBackgroundFile = "/tmp/break.png"
         settings.recordSystemAudio = true
         settings.recordMicrophone = true
         settings.microphoneDeviceID = "test-mic-id"
@@ -245,6 +259,20 @@ public enum SelfTestRunner {
         try expect(store.load() == settings, "Expected saved settings to round-trip through the store")
 
         defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    private static func testBreakTimerLayout() throws {
+        try expect(BreakTimerLayout.timerText(for: 601) == "10:01", "Expected positive break timer text to format as minutes and seconds")
+        try expect(BreakTimerLayout.timerText(for: 0) == "0:00", "Expected zero break timer text")
+        try expect(BreakTimerLayout.timerText(for: -3) == "0:00", "Expected expired break timer main text to stay at zero")
+        try expect(BreakTimerLayout.expiredText(for: -75) == "(- 1:15)", "Expected expired break timer overrun text")
+
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let textSize = CGSize(width: 200, height: 100)
+        let expiredSize = CGSize(width: 120, height: 60)
+        try expect(BreakTimerLayout.timerOrigin(textSize: textSize, expiredSize: .zero, bounds: bounds, position: 0) == CGPoint(x: 50, y: 50), "Expected top-left break timer placement")
+        try expect(BreakTimerLayout.timerOrigin(textSize: textSize, expiredSize: .zero, bounds: bounds, position: 4) == CGPoint(x: 400, y: 350), "Expected centered break timer placement")
+        try expect(BreakTimerLayout.timerOrigin(textSize: textSize, expiredSize: expiredSize, bounds: bounds, position: 8) == CGPoint(x: 750, y: 580), "Expected bottom-right placement to reserve expired-time height")
     }
 
     /// Synthesize a tall "document" with structured rows, slice overlapping

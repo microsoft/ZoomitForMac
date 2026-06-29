@@ -103,6 +103,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makeStatusItem(controller: AppController) -> NSStatusItem {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.autosaveName = NSStatusItem.AutosaveName("com.sysinternals.ZoomIt.statusItem")
         // Use the Windows ZoomIt icon (document with a magnifying glass) rendered
         // as a black template image so it tints to match the menu bar, following
         // the macOS convention for menu-bar icons.
@@ -123,6 +124,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(recordItem)
         let panoramaItem = NSMenuItem(title: "Panorama Capture", action: #selector(AppController.startPanorama), keyEquivalent: "")
         menu.addItem(panoramaItem)
+        let breakItem = NSMenuItem(title: "Break Timer", action: #selector(AppController.toggleBreakTimer), keyEquivalent: "")
+        menu.addItem(breakItem)
         menu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(AppController.showSettings), keyEquivalent: ",")
         menu.addItem(settingsItem)

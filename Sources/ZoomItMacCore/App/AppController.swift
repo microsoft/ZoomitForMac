@@ -45,6 +45,10 @@ final class AppController: NSObject {
         modeCoordinator.handle(.startPanorama(save: false))
     }
 
+    @objc func toggleBreakTimer() {
+        modeCoordinator.handle(.toggleBreakTimer)
+    }
+
     @objc func showSettings() {
         settingsWindowController.show()
     }

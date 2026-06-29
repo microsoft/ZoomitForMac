@@ -32,6 +32,13 @@ swift run ZoomIt
 
 The self-test covers viewport math, annotation lifecycle/rendering, settings persistence, and panorama stitcher regressions.
 
+Launch at login requires running ZoomIt as an app bundle so macOS attributes the login item to ZoomIt instead of the host process used for development. Build the bundle with:
+
+```sh
+zsh Scripts/build-app.sh
+open .build/ZoomIt.app
+```
+
 ## Default Hotkeys
 
 | Action | Shortcut |

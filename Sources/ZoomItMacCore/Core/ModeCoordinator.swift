@@ -36,6 +36,12 @@ final class ModeCoordinator {
         permissionService: permissionService,
         settingsStore: settingsStore
     )
+        /// Drives the full-screen break timer (Control+3).
+        private lazy var breakTimerController = BreakTimerController(
+            displayManager: displayManager,
+            captureService: captureService,
+            settingsStore: settingsStore
+        )
     /// Notified when recording starts/stops so the UI (menu-bar icon) can react.
     var onRecordingStateChanged: ((Bool) -> Void)?
     /// Invoked when live zoom starts/stops so global Control+Up/Down zoom
@@ -93,7 +99,11 @@ final class ModeCoordinator {
         case .zoomOutOrExit:
             zoomOutOrExit()
         case .exit:
-            animateExit()
+            if mode == .breakTimer {
+                stopBreakTimer()
+            } else {
+                animateExit()
+            }
         case .undo:
             annotationController.undo()
             overlayController.requestRedraw()
@@ -106,6 +116,8 @@ final class ModeCoordinator {
             toggleRecording(region: region)
         case .startPanorama(let save):
             togglePanorama(save: save)
+        case .toggleBreakTimer:
+            toggleBreakTimer()
         case .setTool(let tool):
             annotationController.currentTool = tool
         case .setColor(let color):
@@ -375,6 +387,10 @@ final class ModeCoordinator {
     }
 
     private func exitActiveMode() {
+        if mode == .breakTimer {
+            stopBreakTimer()
+            return
+        }
         stopLiveCapture()
         overlayController.close()
         annotationController.reset()
@@ -439,6 +455,36 @@ final class ModeCoordinator {
             self.exitActiveMode()
         }
         panoramaController.toggle(save: save) { _ in }
+    }
+
+    private func toggleBreakTimer() {
+        if mode == .breakTimer {
+            stopBreakTimer()
+            return
+        }
+
+        guard mode == .idle else {
+            animateExit()
+            return
+        }
+
+        let settings = settingsStore.load()
+        Task { @MainActor in
+            do {
+                try await breakTimerController.begin(settings: settings) { [weak self] in
+                    self?.mode = .idle
+                }
+                mode = .breakTimer
+            } catch {
+                presentError(error)
+            }
+        }
+    }
+
+    private func stopBreakTimer() {
+        breakTimerController.close()
+        mode = .idle
+        isExiting = false
     }
 
     /// Tears down the live capture stream, if any, when leaving live zoom.

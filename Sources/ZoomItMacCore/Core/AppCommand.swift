@@ -18,5 +18,6 @@ enum AppCommand: Equatable {
     case captureStill
     case startPanorama(save: Bool)
     case toggleRecording(region: Bool)
+    case toggleBreakTimer
     case exit
 }

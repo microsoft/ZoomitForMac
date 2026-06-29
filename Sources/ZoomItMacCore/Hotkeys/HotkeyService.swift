@@ -14,6 +14,7 @@ final class HotkeyService {
     private var recordRegionHotKeyRef: EventHotKeyRef?
     private var panoramaCopyHotKeyRef: EventHotKeyRef?
     private var panoramaSaveHotKeyRef: EventHotKeyRef?
+    private var breakHotKeyRef: EventHotKeyRef?
     private var zoomInNavRef: EventHotKeyRef?
     private var zoomOutNavRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
@@ -123,6 +124,7 @@ final class HotkeyService {
                 case 9: command = .toggleRecording(region: true)
                 case 10: command = .startPanorama(save: false)
                 case 11: command = .startPanorama(save: true)
+                case 12: command = .toggleBreakTimer
                 default: return noErr
                 }
 
@@ -241,6 +243,16 @@ final class HotkeyService {
             0,
             &panoramaSaveHotKeyRef
         )
+
+        let breakModifiers = NSEvent.ModifierFlags(rawValue: settings.breakHotKeyModifiers)
+        RegisterEventHotKey(
+            UInt32(settings.breakHotKeyCode),
+            carbonModifiers(from: breakModifiers),
+            EventHotKeyID(signature: signature, id: 12),
+            target,
+            0,
+            &breakHotKeyRef
+        )
     }
 
     private func unregisterHotKey() {
@@ -280,6 +292,10 @@ final class HotkeyService {
             UnregisterEventHotKey(panoramaSaveHotKeyRef)
         }
         panoramaSaveHotKeyRef = nil
+        if let breakHotKeyRef {
+            UnregisterEventHotKey(breakHotKeyRef)
+        }
+        breakHotKeyRef = nil
     }
 
     private func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {

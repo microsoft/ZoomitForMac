@@ -41,6 +41,26 @@ struct AppSettings: Equatable {
     /// to a file instead.
     var panoramaHotKeyCode: Int
     var panoramaHotKeyModifiers: UInt
+    /// Virtual key code and modifier-flag raw value for the global break timer
+    /// hotkey.
+    var breakHotKeyCode: Int
+    var breakHotKeyModifiers: UInt
+    /// Break timer duration in whole minutes, matching ZoomIt's options dialog.
+    var breakDurationMinutes: Int
+    /// Break timer text and solid background colors as 0xRRGGBB values.
+    var breakTextColorRGB: UInt32
+    var breakBackgroundColorRGB: UInt32
+    /// Nine-position grid index: 0 top-left through 8 bottom-right.
+    var breakTimerPosition: Int
+    /// Overlay opacity percentage, 10 through 100.
+    var breakOpacity: Int
+    var breakShowExpiredTime: Bool
+    var breakPlaySound: Bool
+    var breakSoundFile: String
+    /// Background mode: 0 none, 1 faded desktop, 2 image file.
+    var breakBackgroundMode: Int
+    var breakBackgroundStretch: Bool
+    var breakBackgroundFile: String
     /// Whether to capture system audio in recordings.
     var recordSystemAudio: Bool
     /// Whether to capture microphone audio in recordings.
@@ -94,6 +114,20 @@ struct AppSettings: Equatable {
         // Control+Shift+8 captures a panorama to a file.
         panoramaHotKeyCode: 28,
         panoramaHotKeyModifiers: 1 << 18,
+        // Control+3 (kVK_ANSI_3 = 20) toggles the break timer.
+        breakHotKeyCode: 20,
+        breakHotKeyModifiers: 1 << 18,
+        breakDurationMinutes: 10,
+        breakTextColorRGB: 0xFF0000,
+        breakBackgroundColorRGB: 0xFFFFFF,
+        breakTimerPosition: 4,
+        breakOpacity: 100,
+        breakShowExpiredTime: true,
+        breakPlaySound: false,
+        breakSoundFile: "",
+        breakBackgroundMode: 0,
+        breakBackgroundStretch: false,
+        breakBackgroundFile: "",
         recordSystemAudio: false,
         recordMicrophone: false,
         microphoneDeviceID: "",
@@ -133,6 +167,19 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let recordHotKeyModifiers = "recordHotKeyModifiers"
         static let panoramaHotKeyCode = "panoramaHotKeyCode"
         static let panoramaHotKeyModifiers = "panoramaHotKeyModifiers"
+        static let breakHotKeyCode = "breakHotKeyCode"
+        static let breakHotKeyModifiers = "breakHotKeyModifiers"
+        static let breakDurationMinutes = "breakDurationMinutes"
+        static let breakTextColorRGB = "breakTextColorRGB"
+        static let breakBackgroundColorRGB = "breakBackgroundColorRGB"
+        static let breakTimerPosition = "breakTimerPosition"
+        static let breakOpacity = "breakOpacity"
+        static let breakShowExpiredTime = "breakShowExpiredTime"
+        static let breakPlaySound = "breakPlaySound"
+        static let breakSoundFile = "breakSoundFile"
+        static let breakBackgroundMode = "breakBackgroundMode"
+        static let breakBackgroundStretch = "breakBackgroundStretch"
+        static let breakBackgroundFile = "breakBackgroundFile"
         static let recordSystemAudio = "recordSystemAudio"
         static let recordMicrophone = "recordMicrophone"
         static let microphoneDeviceID = "microphoneDeviceID"
@@ -240,6 +287,58 @@ final class UserDefaultsSettingsStore: SettingsStore {
             settings.panoramaHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.panoramaHotKeyModifiers))
         }
 
+        if defaults.object(forKey: Key.breakHotKeyCode) != nil {
+            settings.breakHotKeyCode = defaults.integer(forKey: Key.breakHotKeyCode)
+        }
+
+        if defaults.object(forKey: Key.breakHotKeyModifiers) != nil {
+            settings.breakHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.breakHotKeyModifiers))
+        }
+
+        if defaults.object(forKey: Key.breakDurationMinutes) != nil {
+            settings.breakDurationMinutes = defaults.integer(forKey: Key.breakDurationMinutes)
+        }
+
+        if defaults.object(forKey: Key.breakTextColorRGB) != nil {
+            settings.breakTextColorRGB = UInt32(defaults.integer(forKey: Key.breakTextColorRGB))
+        }
+
+        if defaults.object(forKey: Key.breakBackgroundColorRGB) != nil {
+            settings.breakBackgroundColorRGB = UInt32(defaults.integer(forKey: Key.breakBackgroundColorRGB))
+        }
+
+        if defaults.object(forKey: Key.breakTimerPosition) != nil {
+            settings.breakTimerPosition = defaults.integer(forKey: Key.breakTimerPosition)
+        }
+
+        if defaults.object(forKey: Key.breakOpacity) != nil {
+            settings.breakOpacity = defaults.integer(forKey: Key.breakOpacity)
+        }
+
+        if defaults.object(forKey: Key.breakShowExpiredTime) != nil {
+            settings.breakShowExpiredTime = defaults.bool(forKey: Key.breakShowExpiredTime)
+        }
+
+        if defaults.object(forKey: Key.breakPlaySound) != nil {
+            settings.breakPlaySound = defaults.bool(forKey: Key.breakPlaySound)
+        }
+
+        if let soundFile = defaults.string(forKey: Key.breakSoundFile) {
+            settings.breakSoundFile = soundFile
+        }
+
+        if defaults.object(forKey: Key.breakBackgroundMode) != nil {
+            settings.breakBackgroundMode = defaults.integer(forKey: Key.breakBackgroundMode)
+        }
+
+        if defaults.object(forKey: Key.breakBackgroundStretch) != nil {
+            settings.breakBackgroundStretch = defaults.bool(forKey: Key.breakBackgroundStretch)
+        }
+
+        if let backgroundFile = defaults.string(forKey: Key.breakBackgroundFile) {
+            settings.breakBackgroundFile = backgroundFile
+        }
+
         if defaults.object(forKey: Key.recordSystemAudio) != nil {
             settings.recordSystemAudio = defaults.bool(forKey: Key.recordSystemAudio)
         }
@@ -297,6 +396,19 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(Int(bitPattern: settings.recordHotKeyModifiers), forKey: Key.recordHotKeyModifiers)
         defaults.set(settings.panoramaHotKeyCode, forKey: Key.panoramaHotKeyCode)
         defaults.set(Int(bitPattern: settings.panoramaHotKeyModifiers), forKey: Key.panoramaHotKeyModifiers)
+        defaults.set(settings.breakHotKeyCode, forKey: Key.breakHotKeyCode)
+        defaults.set(Int(bitPattern: settings.breakHotKeyModifiers), forKey: Key.breakHotKeyModifiers)
+        defaults.set(settings.breakDurationMinutes, forKey: Key.breakDurationMinutes)
+        defaults.set(Int(settings.breakTextColorRGB), forKey: Key.breakTextColorRGB)
+        defaults.set(Int(settings.breakBackgroundColorRGB), forKey: Key.breakBackgroundColorRGB)
+        defaults.set(settings.breakTimerPosition, forKey: Key.breakTimerPosition)
+        defaults.set(settings.breakOpacity, forKey: Key.breakOpacity)
+        defaults.set(settings.breakShowExpiredTime, forKey: Key.breakShowExpiredTime)
+        defaults.set(settings.breakPlaySound, forKey: Key.breakPlaySound)
+        defaults.set(settings.breakSoundFile, forKey: Key.breakSoundFile)
+        defaults.set(settings.breakBackgroundMode, forKey: Key.breakBackgroundMode)
+        defaults.set(settings.breakBackgroundStretch, forKey: Key.breakBackgroundStretch)
+        defaults.set(settings.breakBackgroundFile, forKey: Key.breakBackgroundFile)
         defaults.set(settings.recordSystemAudio, forKey: Key.recordSystemAudio)
         defaults.set(settings.recordMicrophone, forKey: Key.recordMicrophone)
         defaults.set(settings.microphoneDeviceID, forKey: Key.microphoneDeviceID)

@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 @MainActor
 private final class SettingsWindow: NSWindow {
@@ -30,8 +31,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var settings: AppSettings
 
     private static let homepageURLString = "http://www.sysinternals.com"
-    private static let contentWidth: CGFloat = 560
-    private static let wrappedLabelWidth: CGFloat = 528
+    private static let contentWidth: CGFloat = 504
+    private static let panelHorizontalInset: CGFloat = 28
+    private static let wrappedLabelWidth: CGFloat = contentWidth - panelHorizontalInset * 2
 
     private var window: NSWindow?
 
@@ -53,11 +55,20 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private weak var webcamSizePopup: NSPopUpButton?
     private weak var webcamShapePopup: NSPopUpButton?
 
+    // Break tab controls.
+    private weak var breakDurationLabel: NSTextField?
+    private weak var breakSoundFileField: NSTextField?
+    private weak var breakBackgroundModePopup: NSPopUpButton?
+    private weak var breakBackgroundFileField: NSTextField?
+    private weak var breakBackgroundBrowseButton: NSButton?
+    private weak var breakBackgroundStretchCheckbox: NSButton?
+
     // Hotkey recorders.
     private enum HotKeyTarget {
         case zoom
         case draw
         case live
+        case breakTimer
         case snip
         case record
         case panorama
@@ -65,6 +76,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private weak var hotKeyButton: NSButton?
     private weak var drawHotKeyButton: NSButton?
     private weak var liveHotKeyButton: NSButton?
+    private weak var breakHotKeyButton: NSButton?
     private weak var snipHotKeyButton: NSButton?
     private weak var recordHotKeyButton: NSButton?
     private weak var panoramaHotKeyButton: NSButton?
@@ -103,6 +115,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         hotKeyButton?.title = zoomHotKeyDisplayString()
         drawHotKeyButton?.title = drawHotKeyDisplayString()
         liveHotKeyButton?.title = liveHotKeyDisplayString()
+        breakHotKeyButton?.title = breakHotKeyDisplayString()
         snipHotKeyButton?.title = snipHotKeyDisplayString()
         recordHotKeyButton?.title = recordHotKeyDisplayString()
         panoramaHotKeyButton?.title = panoramaHotKeyDisplayString()
@@ -133,6 +146,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             ("Zoom", makeZoomTab()),
             ("Draw", makeDrawTab()),
             ("Type", makeTypeTab()),
+            ("Break", makeBreakTab()),
             ("Snip", makeSnipTab()),
             ("Record", makeRecordTab()),
             ("Panorama", makePanoramaTab())
@@ -148,9 +162,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             widthConstraint.isActive = false
         }
 
-        // Add a little extra height beyond the tallest tab so even that tab
-        // (the Draw tab) keeps some breathing room below its content.
-        let tabContentHeight = maxContentHeight + 16
+        // Add only a small cushion beyond the tallest tab; the tab contents
+        // already carry their own bottom inset.
+        let tabContentHeight = maxContentHeight + 4
 
         let tabView = NSTabView()
         tabView.translatesAutoresizingMaskIntoConstraints = false
@@ -271,13 +285,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         NSWorkspace.shared.open(url)
     }
 
-    private func makeColumn(_ rows: [NSView]) -> NSView {
+    private func makeColumn(_ rows: [NSView], spacing: CGFloat = 14) -> NSView {
         let stack = NSStackView(views: rows)
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 14
+        stack.spacing = spacing
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 12, right: 16)
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: Self.panelHorizontalInset, bottom: 12, right: Self.panelHorizontalInset)
         return stack
     }
 
@@ -310,6 +324,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let launchCheck = NSButton(checkboxWithTitle: "Launch ZoomIt when I log in", target: self, action: #selector(toggleLaunchAtLogin(_:)))
         launchCheck.state = settings.launchAtLogin ? .on : .off
+        launchCheck.isEnabled = LaunchAtLogin.isAvailable
+        if !LaunchAtLogin.isAvailable {
+            launchCheck.toolTip = "Launch at login requires running ZoomIt from ZoomIt.app."
+        }
         launchAtLoginCheckbox = launchCheck
 
         return makeColumn([help, launchCheck])
@@ -412,6 +430,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         beginRecording(target: .live, sender: sender)
     }
 
+    @objc private func toggleBreakHotKeyRecording(_ sender: NSButton) {
+        beginRecording(target: .breakTimer, sender: sender)
+    }
+
     @objc private func toggleSnipHotKeyRecording(_ sender: NSButton) {
         beginRecording(target: .snip, sender: sender)
     }
@@ -458,7 +480,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         case .zoom:
             // Reject a shortcut already assigned to another ZoomIt hotkey.
             if conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
-                conflictsWithLive(code: newCode, modifiers: newModifiers) {
+                conflictsWithLive(code: newCode, modifiers: newModifiers) ||
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -466,7 +489,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             settings.hotKeyModifiers = newModifiers
         case .draw:
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
-                conflictsWithLive(code: newCode, modifiers: newModifiers) {
+                conflictsWithLive(code: newCode, modifiers: newModifiers) ||
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -474,16 +498,30 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             settings.drawHotKeyModifiers = newModifiers
         case .live:
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
-                conflictsWithDraw(code: newCode, modifiers: newModifiers) {
+                conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
             settings.liveHotKeyCode = newCode
             settings.liveHotKeyModifiers = newModifiers
+        case .breakTimer:
+            if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
+                conflictsWithLive(code: newCode, modifiers: newModifiers) ||
+                conflictsWithSnip(code: newCode, modifiers: newModifiers) ||
+                conflictsWithRecord(code: newCode, modifiers: newModifiers) ||
+                conflictsWithPanorama(code: newCode, modifiers: newModifiers) {
+                NSSound.beep()
+                return nil
+            }
+            settings.breakHotKeyCode = newCode
+            settings.breakHotKeyModifiers = newModifiers
         case .snip:
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
-                conflictsWithLive(code: newCode, modifiers: newModifiers) {
+                conflictsWithLive(code: newCode, modifiers: newModifiers) ||
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -492,7 +530,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         case .record:
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
-                conflictsWithLive(code: newCode, modifiers: newModifiers) {
+                conflictsWithLive(code: newCode, modifiers: newModifiers) ||
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -501,7 +540,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         case .panorama:
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
-                conflictsWithLive(code: newCode, modifiers: newModifiers) {
+                conflictsWithLive(code: newCode, modifiers: newModifiers) ||
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -528,6 +568,22 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         code == settings.liveHotKeyCode && modifiers == settings.liveHotKeyModifiers
     }
 
+    private func conflictsWithBreak(code: Int, modifiers: UInt) -> Bool {
+        code == settings.breakHotKeyCode && modifiers == settings.breakHotKeyModifiers
+    }
+
+    private func conflictsWithSnip(code: Int, modifiers: UInt) -> Bool {
+        code == settings.snipHotKeyCode && modifiers == settings.snipHotKeyModifiers
+    }
+
+    private func conflictsWithRecord(code: Int, modifiers: UInt) -> Bool {
+        code == settings.recordHotKeyCode && modifiers == settings.recordHotKeyModifiers
+    }
+
+    private func conflictsWithPanorama(code: Int, modifiers: UInt) -> Bool {
+        code == settings.panoramaHotKeyCode && modifiers == settings.panoramaHotKeyModifiers
+    }
+
     private func finishRecording() {
         if let hotKeyMonitor {
             NSEvent.removeMonitor(hotKeyMonitor)
@@ -537,6 +593,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         hotKeyButton?.title = zoomHotKeyDisplayString()
         drawHotKeyButton?.title = drawHotKeyDisplayString()
         liveHotKeyButton?.title = liveHotKeyDisplayString()
+        breakHotKeyButton?.title = breakHotKeyDisplayString()
         snipHotKeyButton?.title = snipHotKeyDisplayString()
         recordHotKeyButton?.title = recordHotKeyDisplayString()
         panoramaHotKeyButton?.title = panoramaHotKeyDisplayString()
@@ -552,6 +609,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func liveHotKeyDisplayString() -> String {
         Self.describe(keyCode: settings.liveHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.liveHotKeyModifiers))
+    }
+
+    private func breakHotKeyDisplayString() -> String {
+        Self.describe(keyCode: settings.breakHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.breakHotKeyModifiers))
     }
 
     private func snipHotKeyDisplayString() -> String {
@@ -633,6 +694,211 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         return makeColumn([help, fontRow, sample])
     }
+
+    // MARK: - Break tab
+
+    private func makeBreakTab() -> NSView {
+        let help = makeLabel(
+            "Press the break timer shortcut to show a full-screen countdown. Use the arrow keys or mouse wheel to adjust time, color keys to change timer color, and Escape or right-click to exit.",
+            wraps: true
+        )
+
+        let hotKeyButton = NSButton(title: breakHotKeyDisplayString(), target: self, action: #selector(toggleBreakHotKeyRecording(_:)))
+        hotKeyButton.bezelStyle = .rounded
+        hotKeyButton.setButtonType(.momentaryPushIn)
+        hotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+        breakHotKeyButton = hotKeyButton
+
+        let durationStepper = NSStepper()
+        durationStepper.minValue = 1
+        durationStepper.maxValue = 99
+        durationStepper.integerValue = settings.breakDurationMinutes
+        durationStepper.increment = 1
+        durationStepper.target = self
+        durationStepper.action = #selector(breakDurationChanged(_:))
+        let durationLabel = makeLabel("")
+        breakDurationLabel = durationLabel
+        updateBreakDurationLabel()
+        let timerRow = makeRow([makeLabel("Break timer:"), hotKeyButton, makeLabel("Duration:"), durationStepper, durationLabel])
+
+        let expiredCheck = NSButton(checkboxWithTitle: "Show expired time after 0:00", target: self, action: #selector(breakShowExpiredChanged(_:)))
+        expiredCheck.state = settings.breakShowExpiredTime ? .on : .off
+
+        let textColorPopup = makeColorPopup(selected: settings.breakTextColorRGB, action: #selector(breakTextColorChanged(_:)))
+        let backgroundColorPopup = makeColorPopup(selected: settings.breakBackgroundColorRGB, action: #selector(breakBackgroundColorChanged(_:)))
+        let colorRow = makeRow([makeLabel("Timer color:"), textColorPopup, makeLabel("Background:"), backgroundColorPopup])
+
+        let positionPopup = makeIndexedPopup(
+            titles: ["Top-left", "Top", "Top-right", "Left", "Center", "Right", "Bottom-left", "Bottom", "Bottom-right"],
+            selected: settings.breakTimerPosition,
+            action: #selector(breakPositionChanged(_:))
+        )
+        positionPopup.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        let opacityPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        opacityPopup.translatesAutoresizingMaskIntoConstraints = false
+        for value in stride(from: 10, through: 100, by: 10) {
+            opacityPopup.addItem(withTitle: "\(value)%")
+            opacityPopup.lastItem?.representedObject = value
+        }
+        opacityPopup.selectItem(withTitle: "\(min(max(settings.breakOpacity, 10), 100))%")
+        opacityPopup.target = self
+        opacityPopup.action = #selector(breakOpacityChanged(_:))
+        let layoutRow = makeRow([makeLabel("Position:"), positionPopup, makeLabel("Opacity:"), opacityPopup])
+
+        let soundCheck = NSButton(checkboxWithTitle: "Play sound at 0:00", target: self, action: #selector(breakPlaySoundChanged(_:)))
+        soundCheck.state = settings.breakPlaySound ? .on : .off
+    let behaviorRow = makeRow([expiredCheck, soundCheck])
+        let soundField = makePathField(settings.breakSoundFile)
+        breakSoundFileField = soundField
+        let soundBrowse = NSButton(title: "Browse…", target: self, action: #selector(chooseBreakSoundFile(_:)))
+        soundBrowse.bezelStyle = .rounded
+    let soundFileRow = makeRow([makeLabel("Sound:"), soundField, soundBrowse])
+
+        let backgroundModePopup = makeIndexedPopup(
+            titles: ["No image", "Faded desktop", "Image file"],
+            selected: settings.breakBackgroundMode,
+            action: #selector(breakBackgroundModeChanged(_:))
+        )
+        breakBackgroundModePopup = backgroundModePopup
+        backgroundModePopup.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        let backgroundField = makePathField(settings.breakBackgroundFile)
+        breakBackgroundFileField = backgroundField
+        let backgroundBrowse = NSButton(title: "Browse…", target: self, action: #selector(chooseBreakBackgroundFile(_:)))
+        backgroundBrowse.bezelStyle = .rounded
+        breakBackgroundBrowseButton = backgroundBrowse
+        let stretchCheck = NSButton(checkboxWithTitle: "Stretch image", target: self, action: #selector(breakBackgroundStretchChanged(_:)))
+        stretchCheck.state = settings.breakBackgroundStretch ? .on : .off
+        breakBackgroundStretchCheckbox = stretchCheck
+        let backgroundModeRow = makeRow([makeLabel("Background:"), backgroundModePopup, stretchCheck])
+        let backgroundFileRow = makeRow([makeLabel("Image file:"), backgroundField, backgroundBrowse])
+
+        updateBreakBackgroundControlsEnabled()
+        return makeColumn([
+            help,
+            timerRow,
+            behaviorRow,
+            colorRow,
+            layoutRow,
+            soundFileRow,
+            backgroundModeRow,
+            backgroundFileRow
+        ], spacing: 8)
+    }
+
+    private func updateBreakDurationLabel() {
+        breakDurationLabel?.stringValue = "\(settings.breakDurationMinutes) minutes"
+    }
+
+    private func makePathField(_ path: String) -> NSTextField {
+        let field = NSTextField(labelWithString: path.isEmpty ? "No file selected" : path)
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.lineBreakMode = .byTruncatingMiddle
+        field.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        return field
+    }
+
+    private func makeColorPopup(selected: UInt32, action: Selector) -> NSPopUpButton {
+        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        popup.translatesAutoresizingMaskIntoConstraints = false
+        for option in Self.breakColorOptions {
+            popup.addItem(withTitle: option.name)
+            popup.lastItem?.representedObject = Int(option.rgb)
+        }
+        let selectedIndex = Self.breakColorOptions.firstIndex { $0.rgb == selected } ?? 0
+        popup.selectItem(at: selectedIndex)
+        popup.target = self
+        popup.action = action
+        return popup
+    }
+
+    private func updateBreakBackgroundControlsEnabled() {
+        let usesImageFile = settings.breakBackgroundMode == 2
+        breakBackgroundFileField?.isEnabled = usesImageFile
+        breakBackgroundBrowseButton?.isEnabled = usesImageFile
+        breakBackgroundStretchCheckbox?.isEnabled = usesImageFile
+    }
+
+    @objc private func breakDurationChanged(_ sender: NSStepper) {
+        settings.breakDurationMinutes = min(max(sender.integerValue, 1), 99)
+        updateBreakDurationLabel()
+        persist()
+    }
+
+    @objc private func breakShowExpiredChanged(_ sender: NSButton) {
+        settings.breakShowExpiredTime = sender.state == .on
+        persist()
+    }
+
+    @objc private func breakTextColorChanged(_ sender: NSPopUpButton) {
+        settings.breakTextColorRGB = UInt32((sender.selectedItem?.representedObject as? Int) ?? Int(settings.breakTextColorRGB))
+        persist()
+    }
+
+    @objc private func breakBackgroundColorChanged(_ sender: NSPopUpButton) {
+        settings.breakBackgroundColorRGB = UInt32((sender.selectedItem?.representedObject as? Int) ?? Int(settings.breakBackgroundColorRGB))
+        persist()
+    }
+
+    @objc private func breakPositionChanged(_ sender: NSPopUpButton) {
+        settings.breakTimerPosition = sender.indexOfSelectedItem
+        persist()
+    }
+
+    @objc private func breakOpacityChanged(_ sender: NSPopUpButton) {
+        settings.breakOpacity = (sender.selectedItem?.representedObject as? Int) ?? settings.breakOpacity
+        persist()
+    }
+
+    @objc private func breakPlaySoundChanged(_ sender: NSButton) {
+        settings.breakPlaySound = sender.state == .on
+        persist()
+    }
+
+    @objc private func chooseBreakSoundFile(_ sender: NSButton) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.audio]
+        panel.title = "ZoomIt: Specify Sound File"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        settings.breakSoundFile = url.path
+        breakSoundFileField?.stringValue = url.path
+        persist()
+    }
+
+    @objc private func breakBackgroundModeChanged(_ sender: NSPopUpButton) {
+        settings.breakBackgroundMode = sender.indexOfSelectedItem
+        updateBreakBackgroundControlsEnabled()
+        persist()
+    }
+
+    @objc private func chooseBreakBackgroundFile(_ sender: NSButton) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.image]
+        panel.title = "ZoomIt: Specify Background File"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        settings.breakBackgroundFile = url.path
+        breakBackgroundFileField?.stringValue = url.path
+        persist()
+    }
+
+    @objc private func breakBackgroundStretchChanged(_ sender: NSButton) {
+        settings.breakBackgroundStretch = sender.state == .on
+        persist()
+    }
+
+    private static let breakColorOptions: [(name: String, rgb: UInt32)] = [
+        ("Red", 0xFF0000),
+        ("Green", 0x00FF00),
+        ("Blue", 0x0000FF),
+        ("Orange", 0xFFA500),
+        ("Yellow", 0xFFFF00),
+        ("Pink", 0xFF69B4),
+        ("White", 0xFFFFFF),
+        ("Black", 0x000000)
+    ]
 
     // MARK: - Snip tab
 

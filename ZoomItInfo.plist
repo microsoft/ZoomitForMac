@@ -6,6 +6,8 @@
     <string>com.sysinternals.zoomitmac</string>
     <key>CFBundleName</key>
     <string>ZoomIt</string>
+    <key>CFBundleDisplayName</key>
+    <string>ZoomIt</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>ZoomIt records your microphone when you enable microphone capture for screen recordings.</string>
     <key>NSCameraUsageDescription</key>
