@@ -609,8 +609,12 @@ final class RecordingController {
                 self.beginCapture(display: display, sourceRect: rect)
             }
         } else {
-            beginCapture(display: display, sourceRect: nil)
+            beginCapture(display: display, sourceRect: fullDisplaySourceRect(for: display))
         }
+    }
+
+    private func fullDisplaySourceRect(for display: DisplayDescriptor) -> CGRect {
+        CGRect(origin: .zero, size: display.frame.size)
     }
 
     private func beginCapture(display: DisplayDescriptor, sourceRect: CGRect?) {
