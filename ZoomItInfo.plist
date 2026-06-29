@@ -8,5 +8,7 @@
     <string>ZoomIt</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>ZoomIt records your microphone when you enable microphone capture for screen recordings.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>ZoomIt shows your webcam as a picture-in-picture overlay when you enable it for screen recordings.</string>
 </dict>
 </plist>

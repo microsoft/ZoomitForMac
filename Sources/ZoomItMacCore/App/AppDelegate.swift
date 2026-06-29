@@ -10,7 +10,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        guard SingleInstance.claimOrActivateExisting() else {
+            NSApplication.shared.terminate(nil)
+            return
+        }
+
+        ZoomItAppIcon.apply()
+
         let settingsStore = UserDefaultsSettingsStore()
+        let savedSettings = settingsStore.load()
+        if settingsStore.hasLaunchAtLoginPreference {
+            LaunchAtLogin.applySavedPreference(savedSettings.launchAtLogin)
+        } else if LaunchAtLogin.isEnabledOrPending {
+            var migratedSettings = savedSettings
+            migratedSettings.launchAtLogin = true
+            settingsStore.save(migratedSettings)
+        }
         let permissionService = SystemPermissionService()
         let displayManager = SystemDisplayManager()
         let captureService = ScreenCaptureKitCaptureService(displayManager: displayManager)
@@ -49,11 +64,27 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             modeCoordinator: modeCoordinator
         )
 
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(showSettingsFromOtherInstance(_:)),
+            name: SingleInstance.showSettingsNotification,
+            object: nil
+        )
+
         statusItem = makeStatusItem(controller: appController!)
         modeCoordinator.onRecordingStateChanged = { [weak self] recording in
             self?.updateRecordingIndicator(recording)
         }
         hotkeyService.start()
+    }
+
+    public func applicationWillTerminate(_ notification: Notification) {
+        DistributedNotificationCenter.default().removeObserver(self)
+        SingleInstance.release()
+    }
+
+    @objc private func showSettingsFromOtherInstance(_ notification: Notification) {
+        appController?.showSettings()
     }
 
     /// Swaps the menu-bar icon for a red record indicator while recording.
@@ -90,6 +121,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(liveZoomItem)
         let recordItem = NSMenuItem(title: "Record Screen", action: #selector(AppController.toggleRecording), keyEquivalent: "")
         menu.addItem(recordItem)
+        let panoramaItem = NSMenuItem(title: "Panorama Capture", action: #selector(AppController.startPanorama), keyEquivalent: "")
+        menu.addItem(panoramaItem)
         menu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(AppController.showSettings), keyEquivalent: ",")
         menu.addItem(settingsItem)
@@ -109,12 +142,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// sizes it for the menu bar. As a template image it is tinted by the system
     /// (black on a light menu bar, white on a dark one).
     private static func menuBarIcon() -> NSImage? {
-        guard let url = Bundle.module.url(forResource: "ZoomItIcon", withExtension: "png"),
-              let image = NSImage(contentsOf: url) else {
-            return nil
-        }
+        guard let image = loadZoomItIcon() else { return nil }
         image.size = NSSize(width: 18, height: 18)
         image.isTemplate = true
         return image
+    }
+
+    private static func loadZoomItIcon() -> NSImage? {
+        ZoomItAppIcon.loadTemplateIcon()
     }
 }

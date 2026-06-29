@@ -8,6 +8,54 @@ final class SnipWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
+/// Owns temporary crosshair cursor pushes for region selection. The second push
+/// happens after app/window activation has had a chance to reset the cursor.
+@MainActor
+final class CrosshairCursorLease {
+    private weak var window: NSWindow?
+    private var active = false
+    private var pushCount = 0
+
+    init(window: NSWindow) {
+        self.window = window
+    }
+
+    func activate() {
+        active = true
+        pushIfActive()
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                self?.setIfActive()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.pushIfActive()
+            }
+        }
+    }
+
+    func invalidate() {
+        active = false
+        while pushCount > 0 {
+            NSCursor.pop()
+            pushCount -= 1
+        }
+    }
+
+    private func pushIfActive() {
+        guard active, window != nil else { return }
+        NSCursor.crosshair.push()
+        pushCount += 1
+        NSCursor.crosshair.set()
+    }
+
+    private func setIfActive() {
+        guard active, window != nil else { return }
+        NSCursor.crosshair.set()
+    }
+}
+
 /// A full-screen region selector used by the snip feature. It freezes a capture
 /// of the display, dims it, and lets the user drag out a rectangle. On mouse-up
 /// it reports the selected rectangle (in top-left view points); Escape cancels.
@@ -136,7 +184,7 @@ final class SnipController {
     private var capturedFrame: CapturedFrame?
     private var saveToFile = false
     private var onFinished: (() -> Void)?
-    private var cursorPushed = false
+    private var cursorLease: CrosshairCursorLease?
 
     init(
         captureService: ScreenCaptureService,
@@ -210,11 +258,9 @@ final class SnipController {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window.makeFirstResponder(view)
-        // Force a crosshair (plus-sign) cursor for the whole selection. Pushing
-        // it is more reliable than cursor rects for a borderless window in a
-        // menu-bar accessory app.
-        NSCursor.crosshair.push()
-        cursorPushed = true
+        let cursorLease = CrosshairCursorLease(window: window)
+        cursorLease.activate()
+        self.cursorLease = cursorLease
         self.window = window
     }
 
@@ -250,10 +296,8 @@ final class SnipController {
     }
 
     private func closeWindow() {
-        if cursorPushed {
-            NSCursor.pop()
-            cursorPushed = false
-        }
+        cursorLease?.invalidate()
+        cursorLease = nil
         window?.orderOut(nil)
         window = nil
     }

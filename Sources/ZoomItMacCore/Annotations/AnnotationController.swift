@@ -178,18 +178,49 @@ final class AnnotationController {
         }
     }
 
+    /// A highlight is the translucent highlighter tool or any shape drawn with
+    /// the translucent Shift+color style. Text is never treated as a highlight.
+    private func isHighlight(_ annotation: Annotation) -> Bool {
+        guard annotation.tool != .text else { return false }
+        return annotation.tool == .highlighter || annotation.style.alpha < 1
+    }
+
     func render(in context: CGContext, bounds: CGRect) {
-        for annotation in annotations + Array(inProgress.map { [$0] } ?? []) {
+        let all = annotations + Array(inProgress.map { [$0] } ?? [])
+        let highlights = all.filter(isHighlight)
+        let solids = all.filter { !isHighlight($0) }
+
+        // Composite every highlight into a single transparency layer drawn at
+        // full opacity, then blend the whole layer once at the highlight alpha.
+        // This way overlapping highlight strokes (within or across annotations)
+        // paint the same opaque pixels and never accumulate, so going over a
+        // highlight again doesn't darken it. Highlights sit beneath solid ink.
+        if !highlights.isEmpty {
+            context.saveGState()
+            context.setAlpha(AnnotationStyle.highlightAlpha)
+            context.beginTransparencyLayer(auxiliaryInfo: nil)
+            for annotation in highlights {
+                render(annotation, in: context, forceOpaque: true)
+            }
+            context.endTransparencyLayer()
+            context.restoreGState()
+        }
+
+        for annotation in solids {
             render(annotation, in: context)
         }
     }
 
-    private func render(_ annotation: Annotation, in context: CGContext) {
+    private func render(_ annotation: Annotation, in context: CGContext, forceOpaque: Bool = false) {
         guard let first = annotation.points.first else { return }
 
-        let color = annotation.style.color.nsColor.withAlphaComponent(annotation.tool == .highlighter ? 0.35 : annotation.style.alpha)
+        let highlight = isHighlight(annotation)
+        // Inside the highlight transparency layer everything is drawn opaque so
+        // overlaps don't accumulate; the layer applies the highlight alpha once.
+        let drawAlpha: CGFloat = forceOpaque ? 1 : (highlight ? AnnotationStyle.highlightAlpha : annotation.style.alpha)
+        let color = annotation.style.color.nsColor.withAlphaComponent(drawAlpha)
         context.setStrokeColor(color.cgColor)
-        context.setFillColor(NSColor.clear.cgColor)
+        context.setFillColor(color.cgColor)
         context.setLineWidth(annotation.style.rootWidth)
         context.setLineCap(.round)
         context.setLineJoin(.round)
@@ -220,10 +251,22 @@ final class AnnotationController {
             }
         case .rectangle:
             guard let last = annotation.points.last else { return }
-            context.stroke(CGRect(origin: first, size: CGSize(width: last.x - first.x, height: last.y - first.y)).standardized)
+            let rect = CGRect(origin: first, size: CGSize(width: last.x - first.x, height: last.y - first.y)).standardized
+            // In highlight mode shapes are filled so they read as a highlight
+            // swatch; otherwise they're outlined.
+            if highlight {
+                context.fill(rect)
+            } else {
+                context.stroke(rect)
+            }
         case .ellipse:
             guard let last = annotation.points.last else { return }
-            context.strokeEllipse(in: CGRect(origin: first, size: CGSize(width: last.x - first.x, height: last.y - first.y)).standardized)
+            let rect = CGRect(origin: first, size: CGSize(width: last.x - first.x, height: last.y - first.y)).standardized
+            if highlight {
+                context.fillEllipse(in: rect)
+            } else {
+                context.strokeEllipse(in: rect)
+            }
         case .text:
             drawText(annotation)
         }

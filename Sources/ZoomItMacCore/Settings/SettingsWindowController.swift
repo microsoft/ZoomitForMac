@@ -1,5 +1,20 @@
 import AppKit
 
+@MainActor
+private final class SettingsWindow: NSWindow {
+    override func cancelOperation(_ sender: Any?) {
+        close()
+    }
+}
+
+@MainActor
+private final class LinkButton: NSButton {
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+}
+
 /// A tabbed preferences window modeled on the Windows ZoomIt options dialog,
 /// exposing the Zoom, Draw, and Type settings that ZoomIt supports. Each tab
 /// carries the same kind of descriptive help text the Windows dialog shows.
@@ -10,9 +25,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let onSuspendHotkeys: () -> Void
     private let onResumeHotkeys: () -> Void
     private let onRequestMicrophone: () -> Void
+    private let onRequestCamera: () -> Void
+    private let onOpenTrimEditor: () -> Void
     private var settings: AppSettings
 
     private static let homepageURLString = "http://www.sysinternals.com"
+    private static let contentWidth: CGFloat = 560
+    private static let wrappedLabelWidth: CGFloat = 528
 
     private var window: NSWindow?
 
@@ -28,6 +47,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     // Record tab controls.
     private weak var microphonePopup: NSPopUpButton?
 
+    // Webcam controls.
+    private weak var webcamDevicePopup: NSPopUpButton?
+    private weak var webcamPositionPopup: NSPopUpButton?
+    private weak var webcamSizePopup: NSPopUpButton?
+    private weak var webcamShapePopup: NSPopUpButton?
+
     // Hotkey recorders.
     private enum HotKeyTarget {
         case zoom
@@ -35,12 +60,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         case live
         case snip
         case record
+        case panorama
     }
     private weak var hotKeyButton: NSButton?
     private weak var drawHotKeyButton: NSButton?
     private weak var liveHotKeyButton: NSButton?
     private weak var snipHotKeyButton: NSButton?
     private weak var recordHotKeyButton: NSButton?
+    private weak var panoramaHotKeyButton: NSButton?
     private var hotKeyMonitor: Any?
     private var recordingTarget: HotKeyTarget?
 
@@ -49,13 +76,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         onHotKeyChange: @escaping () -> Void,
         onSuspendHotkeys: @escaping () -> Void,
         onResumeHotkeys: @escaping () -> Void,
-        onRequestMicrophone: @escaping () -> Void
+        onRequestMicrophone: @escaping () -> Void,
+        onRequestCamera: @escaping () -> Void,
+        onOpenTrimEditor: @escaping () -> Void
     ) {
         self.settingsStore = settingsStore
         self.onHotKeyChange = onHotKeyChange
         self.onSuspendHotkeys = onSuspendHotkeys
         self.onResumeHotkeys = onResumeHotkeys
         self.onRequestMicrophone = onRequestMicrophone
+        self.onRequestCamera = onRequestCamera
+        self.onOpenTrimEditor = onOpenTrimEditor
         self.settings = settingsStore.load()
         super.init()
     }
@@ -74,7 +105,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         liveHotKeyButton?.title = liveHotKeyDisplayString()
         snipHotKeyButton?.title = snipHotKeyDisplayString()
         recordHotKeyButton?.title = recordHotKeyDisplayString()
-        launchAtLoginCheckbox?.state = LaunchAtLogin.isEnabled ? .on : .off
+        panoramaHotKeyButton?.title = panoramaHotKeyDisplayString()
+        launchAtLoginCheckbox?.state = settings.launchAtLogin ? .on : .off
         // Suspend the global hotkeys while the dialog is open so the user can
         // record a new shortcut without it firing; they resume on close.
         onSuspendHotkeys()
@@ -96,20 +128,20 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // share a single height. Equal-height tabs keep the tab view a constant
         // size, which in turn keeps the footer anchored near the bottom no
         // matter which tab is selected.
-        let contentWidth: CGFloat = 452
         let tabs: [(String, NSView)] = [
             ("General", makeGeneralTab()),
             ("Zoom", makeZoomTab()),
             ("Draw", makeDrawTab()),
             ("Type", makeTypeTab()),
             ("Snip", makeSnipTab()),
-            ("Record", makeRecordTab())
+            ("Record", makeRecordTab()),
+            ("Panorama", makePanoramaTab())
         ]
 
         var maxContentHeight: CGFloat = 0
         for (_, content) in tabs {
             content.translatesAutoresizingMaskIntoConstraints = false
-            let widthConstraint = content.widthAnchor.constraint(equalToConstant: contentWidth)
+            let widthConstraint = content.widthAnchor.constraint(equalToConstant: Self.contentWidth)
             widthConstraint.isActive = true
             content.layoutSubtreeIfNeeded()
             maxContentHeight = max(maxContentHeight, content.fittingSize.height)
@@ -129,7 +161,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             let holder = NSView()
             holder.translatesAutoresizingMaskIntoConstraints = true
             holder.autoresizingMask = [.width, .height]
-            holder.frame = NSRect(x: 0, y: 0, width: contentWidth, height: tabContentHeight)
+            holder.frame = NSRect(x: 0, y: 0, width: Self.contentWidth, height: tabContentHeight)
             content.translatesAutoresizingMaskIntoConstraints = false
             holder.addSubview(content)
             NSLayoutConstraint.activate([
@@ -143,14 +175,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // Fix the tab view's size so its content area is exactly
         // contentWidth × tabContentHeight on every tab. The chrome (tab strip and
         // borders) is measured from a probe frame.
-        tabView.frame = NSRect(x: 0, y: 0, width: contentWidth + 24, height: tabContentHeight + 60)
+        tabView.frame = NSRect(x: 0, y: 0, width: Self.contentWidth + 24, height: tabContentHeight + 60)
         tabView.layoutSubtreeIfNeeded()
         let measuredChromeWidth = tabView.frame.width - tabView.contentRect.width
         let measuredChromeHeight = tabView.frame.height - tabView.contentRect.height
         let chromeWidth = measuredChromeWidth > 0 ? measuredChromeWidth : 14
         let chromeHeight = measuredChromeHeight > 4 ? measuredChromeHeight : 34
         NSLayoutConstraint.activate([
-            tabView.widthAnchor.constraint(equalToConstant: contentWidth + chromeWidth),
+            tabView.widthAnchor.constraint(equalToConstant: Self.contentWidth + chromeWidth),
             tabView.heightAnchor.constraint(equalToConstant: tabContentHeight + chromeHeight)
         ])
 
@@ -170,7 +202,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             outer.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
 
-        let window = NSWindow(
+        let window = SettingsWindow(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 480),
             styleMask: [.titled, .closable],
             backing: .buffered,
@@ -218,7 +250,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// Builds a borderless button styled as a web hyperlink to the Sysinternals
     /// home page.
     private func makeLink(title: String) -> NSButton {
-        let button = NSButton(title: title, target: self, action: #selector(openHomepage(_:)))
+        let button = LinkButton(title: title, target: self, action: #selector(openHomepage(_:)))
         button.isBordered = false
         button.bezelStyle = .inline
         button.attributedTitle = NSAttributedString(
@@ -255,7 +287,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         if wraps {
             field.lineBreakMode = .byWordWrapping
             field.maximumNumberOfLines = 0
-            field.preferredMaxLayoutWidth = 420
+            field.preferredMaxLayoutWidth = Self.wrappedLabelWidth
         }
         return field
     }
@@ -277,7 +309,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         )
 
         let launchCheck = NSButton(checkboxWithTitle: "Launch ZoomIt when I log in", target: self, action: #selector(toggleLaunchAtLogin(_:)))
-        launchCheck.state = LaunchAtLogin.isEnabled ? .on : .off
+        launchCheck.state = settings.launchAtLogin ? .on : .off
         launchAtLoginCheckbox = launchCheck
 
         return makeColumn([help, launchCheck])
@@ -285,14 +317,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func toggleLaunchAtLogin(_ sender: NSButton) {
         let enable = sender.state == .on
+        settings.launchAtLogin = enable
+        persist()
         do {
             try LaunchAtLogin.setEnabled(enable)
         } catch {
-            // Revert the checkbox and explain why it could not be changed.
-            sender.state = enable ? .off : .on
             let alert = NSAlert()
             alert.messageText = "Couldn’t update the login item"
-            alert.informativeText = error.localizedDescription
+            alert.informativeText = "ZoomIt saved your startup preference and will try again next launch. macOS reported: \(error.localizedDescription)"
             alert.addButton(withTitle: "OK")
             alert.runModal()
         }
@@ -388,6 +420,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         beginRecording(target: .record, sender: sender)
     }
 
+    @objc private func togglePanoramaHotKeyRecording(_ sender: NSButton) {
+        beginRecording(target: .panorama, sender: sender)
+    }
+
     private func beginRecording(target: HotKeyTarget, sender: NSButton) {
         if recordingTarget != nil {
             // A recording is already in progress; clicking any recorder stops it.
@@ -462,6 +498,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             }
             settings.recordHotKeyCode = newCode
             settings.recordHotKeyModifiers = newModifiers
+        case .panorama:
+            if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
+                conflictsWithLive(code: newCode, modifiers: newModifiers) {
+                NSSound.beep()
+                return nil
+            }
+            settings.panoramaHotKeyCode = newCode
+            settings.panoramaHotKeyModifiers = newModifiers
         case nil:
             return nil
         }
@@ -494,6 +539,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         liveHotKeyButton?.title = liveHotKeyDisplayString()
         snipHotKeyButton?.title = snipHotKeyDisplayString()
         recordHotKeyButton?.title = recordHotKeyDisplayString()
+        panoramaHotKeyButton?.title = panoramaHotKeyDisplayString()
     }
 
     private func zoomHotKeyDisplayString() -> String {
@@ -516,6 +562,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         Self.describe(keyCode: settings.recordHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.recordHotKeyModifiers))
     }
 
+    private func panoramaHotKeyDisplayString() -> String {
+        Self.describe(keyCode: settings.panoramaHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.panoramaHotKeyModifiers))
+    }
+
     // MARK: - Draw tab
 
     private func makeDrawTab() -> NSView {
@@ -523,7 +573,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             """
             Once zoomed, enter drawing mode by pressing the left mouse button; exit drawing mode by pressing the right mouse button.
 
-            Colors: press R, G, B, O, Y, P, W or K for red, green, blue, orange, yellow, pink, white or black. Hold Shift with a color key for a translucent highlighter.
+            Colors: press R, G, B, O, Y, P, W or K for red, green, blue, orange, yellow, pink, white or black. Hold Shift with a color key (for example Shift+R) to draw with a translucent highlighter of that color (50% opacity). Press the color key again without Shift to return to a solid pen.
 
             Shapes: hold Shift for a line, Control for a rectangle, Tab for an ellipse, or Shift+Control for an arrow while dragging.
 
@@ -649,9 +699,37 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         micPopup.action = #selector(microphoneChanged(_:))
         micPopup.isEnabled = settings.recordMicrophone
         microphonePopup = micPopup
-        let micRow = makeRow([makeLabel("Microphone:"), micPopup])
+        let micRow = makeRow([micCheck, makeLabel("Device:"), micPopup])
 
-        return makeColumn([help, recordHotKeyRow, systemAudioCheck, micCheck, micRow])
+        let trimButton = NSButton(title: "Trim…", target: self, action: #selector(openTrimEditor(_:)))
+        trimButton.bezelStyle = .rounded
+        let trimRow = makeRow([makeLabel("Edit existing video:"), trimButton])
+
+        return makeColumn([help, recordHotKeyRow, systemAudioCheck, micRow, trimRow] + makeWebcamRows())
+    }
+
+    // MARK: - Panorama tab
+
+    private func makePanoramaTab() -> NSView {
+        let help = makeLabel(
+            """
+            Press the panorama shortcut and drag a rectangle over scrollable content (for example a long web page or document). ZoomIt then captures the region repeatedly while you scroll.
+
+            Scroll smoothly in one direction — vertically or horizontally — and press the shortcut again to finish. The captured frames are aligned and stitched into a single tall (or wide) image.
+
+            The base shortcut copies the stitched panorama to the clipboard; hold Shift with the shortcut to save it to a PNG file instead.
+            """,
+            wraps: true
+        )
+
+        let panoramaHotKeyButton = NSButton(title: panoramaHotKeyDisplayString(), target: self, action: #selector(togglePanoramaHotKeyRecording(_:)))
+        panoramaHotKeyButton.bezelStyle = .rounded
+        panoramaHotKeyButton.setButtonType(.momentaryPushIn)
+        panoramaHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+        self.panoramaHotKeyButton = panoramaHotKeyButton
+        let panoramaHotKeyRow = makeRow([makeLabel("Panorama:"), panoramaHotKeyButton])
+
+        return makeColumn([help, panoramaHotKeyRow])
     }
 
     @objc private func recordSystemAudioChanged(_ sender: NSButton) {
@@ -671,6 +749,124 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func microphoneChanged(_ sender: NSPopUpButton) {
         settings.microphoneDeviceID = (sender.selectedItem?.representedObject as? String) ?? ""
+        persist()
+    }
+
+    @objc private func openTrimEditor(_ sender: NSButton) {
+        onOpenTrimEditor()
+    }
+
+    // MARK: - Webcam controls
+
+    private func makeWebcamRows() -> [NSView] {
+        let heading = makeLabel("Webcam overlay:")
+        heading.font = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+
+        let enableCheck = NSButton(checkboxWithTitle: "Show webcam in recordings", target: self, action: #selector(webcamEnabledChanged(_:)))
+        enableCheck.state = settings.webcamEnabled ? .on : .off
+
+        let devicePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        devicePopup.translatesAutoresizingMaskIntoConstraints = false
+        var selectedDevice = 0
+        for (index, camera) in VideoDevices.availableCameras().enumerated() {
+            devicePopup.addItem(withTitle: camera.name)
+            devicePopup.lastItem?.representedObject = camera.id
+            if camera.id == settings.webcamDeviceID { selectedDevice = index }
+        }
+        devicePopup.selectItem(at: selectedDevice)
+        devicePopup.target = self
+        devicePopup.action = #selector(webcamDeviceChanged(_:))
+        webcamDevicePopup = devicePopup
+
+        let positionPopup = makeIndexedPopup(
+            titles: ["Top-left", "Top-right", "Bottom-left", "Bottom-right"],
+            selected: settings.webcamPosition,
+            action: #selector(webcamPositionChanged(_:))
+        )
+        webcamPositionPopup = positionPopup
+
+        let sizePopup = makeIndexedPopup(
+            titles: ["Small", "Medium", "Large", "X-Large", "Full screen"],
+            selected: settings.webcamSize,
+            action: #selector(webcamSizeChanged(_:))
+        )
+        webcamSizePopup = sizePopup
+
+        let shapePopup = makeIndexedPopup(
+            titles: ["Rectangle", "Rounded rectangle", "Rounded square", "Circle"],
+            selected: settings.webcamShape,
+            action: #selector(webcamShapeChanged(_:))
+        )
+        webcamShapePopup = shapePopup
+
+        devicePopup.widthAnchor.constraint(equalToConstant: 185).isActive = true
+        positionPopup.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        sizePopup.widthAnchor.constraint(equalToConstant: 115).isActive = true
+        shapePopup.widthAnchor.constraint(equalToConstant: 165).isActive = true
+
+        let webcamEnableRow = makeRow([heading, enableCheck])
+        let webcamPlacementRow = makeRow([
+            makeLabel("Camera:"), devicePopup,
+            makeLabel("Position:"), positionPopup
+        ])
+        let webcamAppearanceRow = makeRow([
+            makeLabel("Size:"), sizePopup,
+            makeLabel("Shape:"), shapePopup
+        ])
+
+        updateWebcamControlsEnabled()
+        return [webcamEnableRow, webcamPlacementRow, webcamAppearanceRow]
+    }
+
+    /// Builds a popup whose item indices map directly to a settings integer.
+    private func makeIndexedPopup(titles: [String], selected: Int, action: Selector) -> NSPopUpButton {
+        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        popup.translatesAutoresizingMaskIntoConstraints = false
+        for title in titles {
+            popup.addItem(withTitle: title)
+        }
+        popup.selectItem(at: min(max(selected, 0), titles.count - 1))
+        popup.target = self
+        popup.action = action
+        return popup
+    }
+
+    private func updateWebcamControlsEnabled() {
+        let enabled = settings.webcamEnabled
+        webcamDevicePopup?.isEnabled = enabled
+        webcamPositionPopup?.isEnabled = enabled
+        webcamSizePopup?.isEnabled = enabled
+        // Shape doesn't apply to full screen.
+        webcamShapePopup?.isEnabled = enabled && settings.webcamSize != 4
+    }
+
+    @objc private func webcamEnabledChanged(_ sender: NSButton) {
+        settings.webcamEnabled = (sender.state == .on)
+        updateWebcamControlsEnabled()
+        persist()
+        if settings.webcamEnabled {
+            onRequestCamera()
+        }
+    }
+
+    @objc private func webcamDeviceChanged(_ sender: NSPopUpButton) {
+        settings.webcamDeviceID = (sender.selectedItem?.representedObject as? String) ?? ""
+        persist()
+    }
+
+    @objc private func webcamPositionChanged(_ sender: NSPopUpButton) {
+        settings.webcamPosition = sender.indexOfSelectedItem
+        persist()
+    }
+
+    @objc private func webcamSizeChanged(_ sender: NSPopUpButton) {
+        settings.webcamSize = sender.indexOfSelectedItem
+        updateWebcamControlsEnabled()
+        persist()
+    }
+
+    @objc private func webcamShapeChanged(_ sender: NSPopUpButton) {
+        settings.webcamShape = sender.indexOfSelectedItem
         persist()
     }
 

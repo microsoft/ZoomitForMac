@@ -23,6 +23,9 @@ protocol PermissionService {
     func microphoneStatus() -> MicrophonePermission
     func requestMicrophoneAccess()
     func openMicrophoneSettings()
+    func cameraStatus() -> MicrophonePermission
+    func requestCameraAccess()
+    func openCameraSettings()
 }
 
 final class SystemPermissionService: PermissionService {
@@ -59,6 +62,27 @@ final class SystemPermissionService: PermissionService {
 
     func openMicrophoneSettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func cameraStatus() -> MicrophonePermission {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            return .granted
+        case .notDetermined:
+            return .notDetermined
+        default:
+            return .denied
+        }
+    }
+
+    func requestCameraAccess() {
+        // Safe because the executable embeds an NSCameraUsageDescription.
+        AVCaptureDevice.requestAccess(for: .video) { _ in }
+    }
+
+    func openCameraSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") else { return }
         NSWorkspace.shared.open(url)
     }
 }

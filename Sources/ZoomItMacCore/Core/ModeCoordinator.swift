@@ -30,6 +30,12 @@ final class ModeCoordinator {
         permissionService: permissionService,
         settingsStore: settingsStore
     )
+    /// Drives panorama (scrolling) capture (Control+8 / Control+Shift+8).
+    private lazy var panoramaController = PanoramaController(
+        displayManager: displayManager,
+        permissionService: permissionService,
+        settingsStore: settingsStore
+    )
     /// Notified when recording starts/stops so the UI (menu-bar icon) can react.
     var onRecordingStateChanged: ((Bool) -> Void)?
     /// Invoked when live zoom starts/stops so global Control+Up/Down zoom
@@ -98,10 +104,17 @@ final class ModeCoordinator {
             startSnip(save: save)
         case .toggleRecording(let region):
             toggleRecording(region: region)
+        case .startPanorama(let save):
+            togglePanorama(save: save)
         case .setTool(let tool):
             annotationController.currentTool = tool
         case .setColor(let color):
             annotationController.currentStyle.color = color
+            annotationController.currentStyle.alpha = 1
+        case .setHighlightColor(let color):
+            // Shift+color: translucent highlighter of that color.
+            annotationController.currentStyle.color = color
+            annotationController.currentStyle.alpha = AnnotationStyle.highlightAlpha
         case .increasePenWidth:
             annotationController.currentStyle.rootWidth += 1
         case .decreasePenWidth:
@@ -122,7 +135,7 @@ final class ModeCoordinator {
         case .decreaseFontSize:
             annotationController.decreaseFontSize()
             overlayController.requestRedraw()
-        case .captureStill, .startPanorama:
+        case .captureStill:
             NSSound.beep()
         }
     }
@@ -376,6 +389,12 @@ final class ModeCoordinator {
         }
     }
 
+    /// Opens an existing video in the clip editor (trim/append/save) without
+    /// recording, mirroring ZoomIt's standalone Trim workflow.
+    func openTrimEditor() {
+        recordingController.openForTrim()
+    }
+
     /// Starts/stops screen recording. Recording runs independently of the zoom
     /// overlay so the user can zoom and draw (and have those captured) while a
     /// recording is in progress.
@@ -389,6 +408,17 @@ final class ModeCoordinator {
         recordingController.toggle(region: region) { [weak self] recording in
             self?.onRecordingStateChanged?(recording)
         }
+    }
+
+    /// Starts/stops panorama (scrolling) capture. Like recording, it runs
+    /// independently of the zoom overlay so the Save dialog isn't hidden behind
+    /// an active overlay.
+    private func togglePanorama(save: Bool) {
+        panoramaController.onWillShowSaveDialog = { [weak self] in
+            guard let self, self.mode != .idle else { return }
+            self.exitActiveMode()
+        }
+        panoramaController.toggle(save: save) { _ in }
     }
 
     /// Tears down the live capture stream, if any, when leaving live zoom.

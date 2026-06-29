@@ -9,13 +9,14 @@ enum AppCommand: Equatable {
     case decreaseFontSize
     case setTool(AnnotationTool)
     case setColor(AnnotationColor)
+    case setHighlightColor(AnnotationColor)
     case increasePenWidth
     case decreasePenWidth
     case undo
     case clear
     case snipRegion(save: Bool)
     case captureStill
-    case startPanorama
+    case startPanorama(save: Bool)
     case toggleRecording(region: Bool)
     case exit
 }

@@ -7,6 +7,10 @@ struct AppSettings: Equatable {
     var rootPenWidth: CGFloat
     var animateZoom: Bool
     var smoothImage: Bool
+    /// The user's desired launch-at-login state. The actual macOS login item
+    /// can temporarily require approval, so this preference is persisted
+    /// separately and reconciled on launch.
+    var launchAtLogin: Bool
     var typingFontName: String
     var typingFontSize: CGFloat
     /// Virtual key code (kVK_*) and NSEvent modifier-flag raw value for the
@@ -31,6 +35,12 @@ struct AppSettings: Equatable {
     /// shortcut with Shift toggled records a selected region.
     var recordHotKeyCode: Int
     var recordHotKeyModifiers: UInt
+    /// Virtual key code and modifier-flag raw value for the global panorama
+    /// (scrolling) capture hotkey. The base shortcut copies the stitched
+    /// panorama to the clipboard; the same shortcut with Shift toggled saves it
+    /// to a file instead.
+    var panoramaHotKeyCode: Int
+    var panoramaHotKeyModifiers: UInt
     /// Whether to capture system audio in recordings.
     var recordSystemAudio: Bool
     /// Whether to capture microphone audio in recordings.
@@ -38,6 +48,16 @@ struct AppSettings: Equatable {
     /// The unique ID of the microphone device to record, or empty for the
     /// system default input.
     var microphoneDeviceID: String
+    /// Whether to overlay the webcam as a picture-in-picture in recordings.
+    var webcamEnabled: Bool
+    /// The unique ID of the camera device, or empty for the default camera.
+    var webcamDeviceID: String
+    /// Corner placement: 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right.
+    var webcamPosition: Int
+    /// Size preset: 0 small, 1 medium, 2 large, 3 x-large, 4 full screen.
+    var webcamSize: Int
+    /// Border shape: 0 rectangle, 1 rounded rectangle, 2 rounded square, 3 circle.
+    var webcamShape: Int
 
     /// Initial magnification levels offered on the Zoom settings tab, matching
     /// ZoomIt's g_ZoomLevels slider values.
@@ -50,6 +70,7 @@ struct AppSettings: Equatable {
         rootPenWidth: 5,
         animateZoom: true,
         smoothImage: true,
+        launchAtLogin: false,
         typingFontName: "",
         typingFontSize: 36,
         // Control+1 (kVK_ANSI_1 = 18, NSEvent.ModifierFlags.control = 1 << 18).
@@ -69,9 +90,18 @@ struct AppSettings: Equatable {
         // Control+Shift+5 records a selected region.
         recordHotKeyCode: 23,
         recordHotKeyModifiers: 1 << 18,
+        // Control+8 (kVK_ANSI_8 = 28) captures a panorama to the clipboard;
+        // Control+Shift+8 captures a panorama to a file.
+        panoramaHotKeyCode: 28,
+        panoramaHotKeyModifiers: 1 << 18,
         recordSystemAudio: false,
         recordMicrophone: false,
-        microphoneDeviceID: ""
+        microphoneDeviceID: "",
+        webcamEnabled: false,
+        webcamDeviceID: "",
+        webcamPosition: 3,
+        webcamSize: 1,
+        webcamShape: 0
     )
 }
 
@@ -88,6 +118,7 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let rootPenWidth = "rootPenWidth"
         static let animateZoom = "animateZoom"
         static let smoothImage = "smoothImage"
+        static let launchAtLogin = "launchAtLogin"
         static let typingFontName = "typingFontName"
         static let typingFontSize = "typingFontSize"
         static let hotKeyCode = "hotKeyCode"
@@ -100,15 +131,26 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let snipHotKeyModifiers = "snipHotKeyModifiers"
         static let recordHotKeyCode = "recordHotKeyCode"
         static let recordHotKeyModifiers = "recordHotKeyModifiers"
+        static let panoramaHotKeyCode = "panoramaHotKeyCode"
+        static let panoramaHotKeyModifiers = "panoramaHotKeyModifiers"
         static let recordSystemAudio = "recordSystemAudio"
         static let recordMicrophone = "recordMicrophone"
         static let microphoneDeviceID = "microphoneDeviceID"
+        static let webcamEnabled = "webcamEnabled"
+        static let webcamDeviceID = "webcamDeviceID"
+        static let webcamPosition = "webcamPosition"
+        static let webcamSize = "webcamSize"
+        static let webcamShape = "webcamShape"
     }
 
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+    }
+
+    var hasLaunchAtLoginPreference: Bool {
+        defaults.object(forKey: Key.launchAtLogin) != nil
     }
 
     func load() -> AppSettings {
@@ -136,6 +178,10 @@ final class UserDefaultsSettingsStore: SettingsStore {
 
         if defaults.object(forKey: Key.smoothImage) != nil {
             settings.smoothImage = defaults.bool(forKey: Key.smoothImage)
+        }
+
+        if defaults.object(forKey: Key.launchAtLogin) != nil {
+            settings.launchAtLogin = defaults.bool(forKey: Key.launchAtLogin)
         }
 
         if let name = defaults.string(forKey: Key.typingFontName) {
@@ -186,6 +232,14 @@ final class UserDefaultsSettingsStore: SettingsStore {
             settings.recordHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.recordHotKeyModifiers))
         }
 
+        if defaults.object(forKey: Key.panoramaHotKeyCode) != nil {
+            settings.panoramaHotKeyCode = defaults.integer(forKey: Key.panoramaHotKeyCode)
+        }
+
+        if defaults.object(forKey: Key.panoramaHotKeyModifiers) != nil {
+            settings.panoramaHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.panoramaHotKeyModifiers))
+        }
+
         if defaults.object(forKey: Key.recordSystemAudio) != nil {
             settings.recordSystemAudio = defaults.bool(forKey: Key.recordSystemAudio)
         }
@@ -198,6 +252,26 @@ final class UserDefaultsSettingsStore: SettingsStore {
             settings.microphoneDeviceID = micID
         }
 
+        if defaults.object(forKey: Key.webcamEnabled) != nil {
+            settings.webcamEnabled = defaults.bool(forKey: Key.webcamEnabled)
+        }
+
+        if let webcamID = defaults.string(forKey: Key.webcamDeviceID) {
+            settings.webcamDeviceID = webcamID
+        }
+
+        if defaults.object(forKey: Key.webcamPosition) != nil {
+            settings.webcamPosition = defaults.integer(forKey: Key.webcamPosition)
+        }
+
+        if defaults.object(forKey: Key.webcamSize) != nil {
+            settings.webcamSize = defaults.integer(forKey: Key.webcamSize)
+        }
+
+        if defaults.object(forKey: Key.webcamShape) != nil {
+            settings.webcamShape = defaults.integer(forKey: Key.webcamShape)
+        }
+
         return settings
     }
 
@@ -208,6 +282,7 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(settings.rootPenWidth, forKey: Key.rootPenWidth)
         defaults.set(settings.animateZoom, forKey: Key.animateZoom)
         defaults.set(settings.smoothImage, forKey: Key.smoothImage)
+        defaults.set(settings.launchAtLogin, forKey: Key.launchAtLogin)
         defaults.set(settings.typingFontName, forKey: Key.typingFontName)
         defaults.set(settings.typingFontSize, forKey: Key.typingFontSize)
         defaults.set(settings.hotKeyCode, forKey: Key.hotKeyCode)
@@ -220,8 +295,15 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(Int(bitPattern: settings.snipHotKeyModifiers), forKey: Key.snipHotKeyModifiers)
         defaults.set(settings.recordHotKeyCode, forKey: Key.recordHotKeyCode)
         defaults.set(Int(bitPattern: settings.recordHotKeyModifiers), forKey: Key.recordHotKeyModifiers)
+        defaults.set(settings.panoramaHotKeyCode, forKey: Key.panoramaHotKeyCode)
+        defaults.set(Int(bitPattern: settings.panoramaHotKeyModifiers), forKey: Key.panoramaHotKeyModifiers)
         defaults.set(settings.recordSystemAudio, forKey: Key.recordSystemAudio)
         defaults.set(settings.recordMicrophone, forKey: Key.recordMicrophone)
         defaults.set(settings.microphoneDeviceID, forKey: Key.microphoneDeviceID)
+        defaults.set(settings.webcamEnabled, forKey: Key.webcamEnabled)
+        defaults.set(settings.webcamDeviceID, forKey: Key.webcamDeviceID)
+        defaults.set(settings.webcamPosition, forKey: Key.webcamPosition)
+        defaults.set(settings.webcamSize, forKey: Key.webcamSize)
+        defaults.set(settings.webcamShape, forKey: Key.webcamShape)
     }
 }

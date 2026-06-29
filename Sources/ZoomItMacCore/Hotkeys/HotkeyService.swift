@@ -12,6 +12,8 @@ final class HotkeyService {
     private var snipSaveHotKeyRef: EventHotKeyRef?
     private var recordHotKeyRef: EventHotKeyRef?
     private var recordRegionHotKeyRef: EventHotKeyRef?
+    private var panoramaCopyHotKeyRef: EventHotKeyRef?
+    private var panoramaSaveHotKeyRef: EventHotKeyRef?
     private var zoomInNavRef: EventHotKeyRef?
     private var zoomOutNavRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
@@ -119,6 +121,8 @@ final class HotkeyService {
                 case 7: command = .snipRegion(save: true)
                 case 8: command = .toggleRecording(region: false)
                 case 9: command = .toggleRecording(region: true)
+                case 10: command = .startPanorama(save: false)
+                case 11: command = .startPanorama(save: true)
                 default: return noErr
                 }
 
@@ -215,6 +219,28 @@ final class HotkeyService {
             0,
             &recordRegionHotKeyRef
         )
+
+        // Panorama: the base shortcut copies the stitched panorama to the
+        // clipboard; the same shortcut with Shift toggled saves it to a file.
+        let panoramaModifiers = NSEvent.ModifierFlags(rawValue: settings.panoramaHotKeyModifiers)
+        RegisterEventHotKey(
+            UInt32(settings.panoramaHotKeyCode),
+            carbonModifiers(from: panoramaModifiers),
+            EventHotKeyID(signature: signature, id: 10),
+            target,
+            0,
+            &panoramaCopyHotKeyRef
+        )
+
+        let panoramaSaveModifiers = NSEvent.ModifierFlags(rawValue: settings.panoramaHotKeyModifiers ^ NSEvent.ModifierFlags.shift.rawValue)
+        RegisterEventHotKey(
+            UInt32(settings.panoramaHotKeyCode),
+            carbonModifiers(from: panoramaSaveModifiers),
+            EventHotKeyID(signature: signature, id: 11),
+            target,
+            0,
+            &panoramaSaveHotKeyRef
+        )
     }
 
     private func unregisterHotKey() {
@@ -246,6 +272,14 @@ final class HotkeyService {
             UnregisterEventHotKey(recordRegionHotKeyRef)
         }
         recordRegionHotKeyRef = nil
+        if let panoramaCopyHotKeyRef {
+            UnregisterEventHotKey(panoramaCopyHotKeyRef)
+        }
+        panoramaCopyHotKeyRef = nil
+        if let panoramaSaveHotKeyRef {
+            UnregisterEventHotKey(panoramaSaveHotKeyRef)
+        }
+        panoramaSaveHotKeyRef = nil
     }
 
     private func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {

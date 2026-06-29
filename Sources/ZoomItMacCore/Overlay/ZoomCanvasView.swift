@@ -15,6 +15,7 @@ final class ZoomCanvasView: NSView {
     /// shape (line/arrow/rectangle/ellipse) is being dragged out.
     private var activeStrokeTool: AnnotationTool?
     private var cursorHidden = false
+    private var postTypingCursorAnchorOffset: CGPoint?
     /// While interactive live zoom is on, the overlay is click-through and a
     /// global monitor tracks the real cursor so the magnified view follows it.
     private var liveMouseMonitor: Any?
@@ -25,7 +26,7 @@ final class ZoomCanvasView: NSView {
     private var regionSaveToFile = false
     private var regionAnchor: CGPoint?
     private var regionRect: CGRect = .zero
-    private var regionCursorPushed = false
+    private var regionCursorLease: CrosshairCursorLease?
     private var onRegionSnipFinished: (() -> Void)?
     private var scrollZoomAccumulator: CGFloat = 0
     private let smoothImage: Bool
@@ -46,21 +47,33 @@ final class ZoomCanvasView: NSView {
     var interactionMode: AppMode = .staticZoom {
         didSet {
             let leftTypingMode = oldValue == .typing && interactionMode != .typing
+            if leftTypingMode {
+                anchorCursorAfterTyping()
+            }
             switch interactionMode {
             case .typing:
-                exitDrawingMode()
+                let wasDrawing = isDrawingMode
+                exitDrawingMode(restoreCursor: false)
+                // When coming from drawing, the pen dot is already tracked in
+                // pointerViewPoint; exitDrawingMode warps the system cursor, so
+                // don't re-read the mouse. Otherwise sync to the real cursor so
+                // the caret appears under it and doesn't jump on the first move.
+                if !wasDrawing, let window {
+                    let windowPoint = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+                    pointerViewPoint = convert(windowPoint, from: nil)
+                }
                 // Place the caret at the current cursor position, like ZoomIt.
-                annotationController.setInsertionPoint(contentPoint(forViewPoint: pointerViewPoint))
+                let insertion = contentPoint(forViewPoint: pointerViewPoint)
+                annotationController.setInsertionPoint(insertion)
             case .drawOnly:
                 // Draw-without-zoom starts already in drawing mode so the first
-                // click begins a stroke immediately.
+                // click begins a stroke immediately. Returning from typing also
+                // restores the drawn cursor, but without warping through the old
+                // zoom anchor.
                 isDrawOnly = true
                 enterDrawingMode()
             default:
                 break
-            }
-            if leftTypingMode {
-                anchorCursorAfterTyping()
             }
             updateLiveZoomInteractivity()
             needsDisplay = true
@@ -151,7 +164,7 @@ final class ZoomCanvasView: NSView {
         context.concatenate(viewportController.contentToDestinationTransform(source: source, destinationBounds: bounds))
         annotationController.render(in: context, bounds: bounds)
         if interactionMode == .typing {
-            drawTypingCaret(in: context)
+            drawTypingCaret(in: context, source: source)
         }
         context.restoreGState()
 
@@ -179,13 +192,15 @@ final class ZoomCanvasView: NSView {
     override func mouseMoved(with event: NSEvent) {
         pointerViewPoint = convert(event.locationInWindow, from: nil)
         if interactionMode == .typing {
+            postTypingCursorAnchorOffset = nil
             // The caret follows the mouse until the first character is typed,
             // then locks in place, matching ZoomIt.
             if !annotationController.isTypingLocked {
-                annotationController.setInsertionPoint(contentPoint(forViewPoint: pointerViewPoint))
+                let insertion = contentPoint(forViewPoint: pointerViewPoint)
+                annotationController.setInsertionPoint(insertion)
             }
         } else if !isDrawingMode {
-            latestCursorLocation = NSEvent.mouseLocation
+            updateLatestCursorLocationFromMouse()
         }
         needsDisplay = true
     }
@@ -201,6 +216,11 @@ final class ZoomCanvasView: NSView {
         }
 
         if interactionMode == .typing {
+            if annotationController.isTypingLocked {
+                finishLockedTypingAtCaret(reason: "mouse down locked")
+                needsDisplay = true
+                return
+            }
             annotationController.setInsertionPoint(contentPoint(for: event))
             needsDisplay = true
             return
@@ -256,18 +276,10 @@ final class ZoomCanvasView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        pointerViewPoint = convert(event.locationInWindow, from: nil)
         if interactionMode == .typing {
             if annotationController.isTypingLocked {
-                // Finish the current text block and return to a free-floating
-                // caret, leaving it where the text cursor was while typing.
-                let insertion = annotationController.typingCaret()?.origin ?? contentPoint(for: event)
-                annotationController.setInsertionPoint(insertion)
-                // Warp the hidden system cursor to the caret so the next mouse
-                // move continues from there rather than snapping back to where
-                // typing mode was entered.
-                if let screenPoint = screenLocation(forContentPoint: insertion) {
-                    warpCursor(toGlobal: screenPoint)
-                }
+                finishLockedTypingAtCaret(reason: "right mouse locked")
             } else {
                 // Caret mode with nothing typed yet: return to pan/zoom mode.
                 commandSink(.toggleTyping(rightAligned: false))
@@ -397,25 +409,29 @@ final class ZoomCanvasView: NSView {
 
     private func handleDrawingShortcut(_ event: NSEvent) -> Void? {
         guard let key = event.charactersIgnoringModifiers?.lowercased() else { return nil }
+        let shift = event.modifierFlags.contains(.shift)
 
         switch key {
-        case "r": commandSink(.setColor(.red))
-        case "g": commandSink(.setColor(.green))
-        case "b": commandSink(.setColor(.blue))
-        case "y": commandSink(.setColor(.yellow))
-        case "o": commandSink(.setColor(.orange))
-        case "p": commandSink(.setColor(.pink))
+        case "r": commandSink(shift ? .setHighlightColor(.red) : .setColor(.red))
+        case "g": commandSink(shift ? .setHighlightColor(.green) : .setColor(.green))
+        case "b": commandSink(shift ? .setHighlightColor(.blue) : .setColor(.blue))
+        case "y": commandSink(shift ? .setHighlightColor(.yellow) : .setColor(.yellow))
+        case "o": commandSink(shift ? .setHighlightColor(.orange) : .setColor(.orange))
+        case "p": commandSink(shift ? .setHighlightColor(.pink) : .setColor(.pink))
         case "w":
-            // In drawing mode, W blanks the screen white (sketch pad); otherwise
-            // it selects the white pen.
-            if isDrawingMode {
+            // Shift+W highlights white; otherwise W blanks the screen (in
+            // drawing mode) or selects the white pen.
+            if shift {
+                commandSink(.setHighlightColor(.white))
+            } else if isDrawingMode {
                 toggleBlankScreen(.white)
             } else {
                 commandSink(.setColor(.white))
             }
         case "k":
-            // In drawing mode, K blanks the screen black; otherwise selects black pen.
-            if isDrawingMode {
+            if shift {
+                commandSink(.setHighlightColor(.black))
+            } else if isDrawingMode {
                 toggleBlankScreen(.black)
             } else {
                 commandSink(.setColor(.black))
@@ -444,7 +460,7 @@ final class ZoomCanvasView: NSView {
         needsDisplay = true
     }
 
-    private func drawTypingCaret(in context: CGContext) {
+    private func drawTypingCaret(in context: CGContext, source: CGRect) {
         guard let caret = annotationController.typingCaret() else { return }
         let color = annotationController.currentStyle.color.nsColor
         context.setStrokeColor(color.cgColor)
@@ -500,7 +516,7 @@ final class ZoomCanvasView: NSView {
         updateLiveZoomInteractivity()
     }
 
-    private func exitDrawingMode() {
+    private func exitDrawingMode(restoreCursor: Bool = true) {
         guard isDrawingMode else { return }
         isDrawingMode = false
         isStroking = false
@@ -510,30 +526,56 @@ final class ZoomCanvasView: NSView {
         // moved around the screen while drawing, so warp the (hidden) system
         // cursor back to the frozen anchor. This keeps panning continuous and
         // prevents the view from jumping when leaving drawing mode.
-        if let anchor = latestCursorLocation {
+        if restoreCursor, let anchor = latestCursorLocation {
             warpCursor(toGlobal: anchor)
         }
         updateLiveZoomInteractivity()
     }
 
-    /// When typing mode ends, the hidden system cursor is wherever the user
-    /// moved it to place the caret, so the next mouse move would re-anchor the
-    /// view there. This mirrors ZoomIt's `WM_USER_TYPING_OFF` handling:
-    ///   * In drawing mode the canvas is frozen, so move the cursor to the
-    ///     caret (`cursorRc`) so drawing continues from where the text ended.
-    ///   * In static zoom we must restore the cursor to where typing began
-    ///     (`textStartPt`) so the zoomed viewport does not recenter on the
-    ///     caret. That entry point is the still-frozen `latestCursorLocation`.
+    /// When typing mode ends, keep the system cursor at the last mouse position
+    /// tracked while typing, or at the text caret once text has locked it.
     private func anchorCursorAfterTyping() {
-        if isDrawingMode {
-            guard let caret = annotationController.typingCaret(),
-                  let screenPoint = screenLocation(forContentPoint: caret.origin) else { return }
-            latestCursorLocation = screenPoint
-            warpCursor(toGlobal: screenPoint)
-        } else if let anchor = latestCursorLocation {
-            // Keep the zoom window anchored where it was before typing.
-            warpCursor(toGlobal: anchor)
+        if annotationController.isTypingLocked, let caret = annotationController.typingCaret() {
+            anchorCursor(toContentPoint: caret.origin, reason: "anchor after typing caret")
+            return
         }
+        syncPointerViewPointFromMouse()
+        latestCursorLocation = NSEvent.mouseLocation
+    }
+
+    private func finishLockedTypingAtCaret(reason: String) {
+        let insertion = annotationController.typingCaret()?.origin ?? contentPoint(forViewPoint: pointerViewPoint)
+        annotationController.setInsertionPoint(insertion)
+        anchorCursor(toContentPoint: insertion, reason: reason)
+    }
+
+    private func anchorCursor(toContentPoint point: CGPoint, reason: String) {
+        let source = viewportController.sourceRect(for: bounds, cursorLocation: latestCursorLocation)
+        pointerViewPoint = viewPoint(forContentPoint: point, source: source)
+        if let global = screenLocation(forViewPoint: pointerViewPoint) {
+            warpCursor(toGlobal: global)
+            if interactionMode == .drawOnly {
+                latestCursorLocation = global
+                postTypingCursorAnchorOffset = nil
+            } else if let anchor = latestCursorLocation {
+                postTypingCursorAnchorOffset = CGPoint(x: anchor.x - global.x, y: anchor.y - global.y)
+            }
+        }
+    }
+
+    private func updateLatestCursorLocationFromMouse() {
+        let mouse = NSEvent.mouseLocation
+        if let offset = postTypingCursorAnchorOffset {
+            latestCursorLocation = CGPoint(x: mouse.x + offset.x, y: mouse.y + offset.y)
+        } else {
+            latestCursorLocation = mouse
+        }
+    }
+
+    private func syncPointerViewPointFromMouse() {
+        guard let window else { return }
+        let windowPoint = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        pointerViewPoint = convert(windowPoint, from: nil)
     }
 
     private func warpCursor(toGlobal point: CGPoint) {
@@ -543,14 +585,15 @@ final class ZoomCanvasView: NSView {
         CGWarpMouseCursorPosition(CGPoint(x: point.x, y: primaryHeight - point.y))
     }
 
-    /// Converts a point in captured-content space to a global screen location in
-    /// NSEvent.mouseLocation coordinates (bottom-left origin on the primary
-    /// screen), suitable for `warpCursor(toGlobal:)`.
-    private func screenLocation(forContentPoint contentPoint: CGPoint) -> CGPoint? {
+    private func viewPoint(forContentPoint point: CGPoint, source: CGRect) -> CGPoint {
+        CGPoint(
+            x: ((point.x - source.minX) / source.width) * bounds.width,
+            y: ((point.y - source.minY) / source.height) * bounds.height
+        )
+    }
+
+    private func screenLocation(forViewPoint viewPoint: CGPoint) -> CGPoint? {
         guard let window else { return nil }
-        let source = viewportController.sourceRect(for: bounds, cursorLocation: latestCursorLocation)
-        let transform = viewportController.contentToDestinationTransform(source: source, destinationBounds: bounds)
-        let viewPoint = contentPoint.applying(transform)
         let windowPoint = convert(viewPoint, to: nil)
         return window.convertPoint(toScreen: windowPoint)
     }
@@ -752,15 +795,15 @@ final class ZoomCanvasView: NSView {
     }
 
     private func pushRegionCursor() {
-        guard !regionCursorPushed else { return }
-        NSCursor.crosshair.push()
-        regionCursorPushed = true
+        guard regionCursorLease == nil, let window else { return }
+        let cursorLease = CrosshairCursorLease(window: window)
+        cursorLease.activate()
+        regionCursorLease = cursorLease
     }
 
     private func popRegionCursor() {
-        guard regionCursorPushed else { return }
-        NSCursor.pop()
-        regionCursorPushed = false
+        regionCursorLease?.invalidate()
+        regionCursorLease = nil
     }
 
     private func drawRegionSelection(in context: CGContext) {

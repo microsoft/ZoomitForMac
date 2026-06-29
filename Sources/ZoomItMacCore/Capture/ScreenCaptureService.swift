@@ -36,18 +36,9 @@ final class ScreenCaptureKitCaptureService: ScreenCaptureService {
     }
 
     func captureDisplay(_ display: DisplayDescriptor) async throws -> CapturedFrame {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let captureDisplay = content.displays.first(where: { $0.displayID == display.id }) else {
-            throw ScreenCaptureError.displayNotFound
+        guard let image = CGDisplayCreateImage(display.id) else {
+            throw ScreenCaptureError.imageCreationFailed
         }
-
-        let filter = SCContentFilter(display: captureDisplay, excludingWindows: [])
-        let configuration = SCStreamConfiguration()
-        configuration.width = Int(display.frame.width * display.scaleFactor)
-        configuration.height = Int(display.frame.height * display.scaleFactor)
-        configuration.showsCursor = false
-
-        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
         return CapturedFrame(
             image: image,
             display: display,

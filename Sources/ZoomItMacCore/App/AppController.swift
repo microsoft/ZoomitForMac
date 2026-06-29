@@ -11,7 +11,9 @@ final class AppController: NSObject {
         onHotKeyChange: { [weak self] in self?.hotkeyService.reloadHotkey() },
         onSuspendHotkeys: { [weak self] in self?.hotkeyService.stop() },
         onResumeHotkeys: { [weak self] in self?.hotkeyService.start() },
-        onRequestMicrophone: { [weak self] in self?.permissionService.requestMicrophoneAccess() }
+        onRequestMicrophone: { [weak self] in self?.permissionService.requestMicrophoneAccess() },
+        onRequestCamera: { [weak self] in self?.permissionService.requestCameraAccess() },
+        onOpenTrimEditor: { [weak self] in self?.modeCoordinator.openTrimEditor() }
     )
 
     init(
@@ -39,6 +41,10 @@ final class AppController: NSObject {
         modeCoordinator.handle(.toggleRecording(region: false))
     }
 
+    @objc func startPanorama() {
+        modeCoordinator.handle(.startPanorama(save: false))
+    }
+
     @objc func showSettings() {
         settingsWindowController.show()
     }
@@ -47,24 +53,28 @@ final class AppController: NSObject {
         let state = permissionService.currentState()
         let screen = state.screenCapture.isGranted ? "Granted" : "Missing"
         let micStatus = permissionService.microphoneStatus()
-        let mic: String
-        switch micStatus {
-        case .granted: mic = "Granted"
-        case .denied: mic = "Denied"
-        case .notDetermined: mic = "Not requested"
+        let camStatus = permissionService.cameraStatus()
+        func describe(_ status: MicrophonePermission) -> String {
+            switch status {
+            case .granted: return "Granted"
+            case .denied: return "Denied"
+            case .notDetermined: return "Not requested"
+            }
         }
 
         let alert = NSAlert()
         alert.messageText = "ZoomIt Permissions"
         alert.informativeText = """
         Screen Recording: \(screen)
-        Microphone: \(mic)
+        Microphone: \(describe(micStatus))
+        Camera: \(describe(camStatus))
 
-        Screen Recording is required for zoom, snip, and recording. Microphone is optional — used only when recording your voice.
+        Screen Recording is required for zoom, snip, and recording. Microphone and Camera are optional — used for recording your voice and webcam.
         """
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Screen Recording Settings…")
         alert.addButton(withTitle: micStatus == .notDetermined ? "Grant Microphone…" : "Microphone Settings…")
+        alert.addButton(withTitle: camStatus == .notDetermined ? "Grant Camera…" : "Camera Settings…")
 
         switch alert.runModal() {
         case .alertSecondButtonReturn:
@@ -74,6 +84,12 @@ final class AppController: NSObject {
                 permissionService.requestMicrophoneAccess()
             } else {
                 permissionService.openMicrophoneSettings()
+            }
+        case NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1):
+            if camStatus == .notDetermined {
+                permissionService.requestCameraAccess()
+            } else {
+                permissionService.openCameraSettings()
             }
         default:
             break

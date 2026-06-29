@@ -52,6 +52,10 @@ struct AnnotationStyle: Equatable {
     var rootWidth: CGFloat
     var alpha: CGFloat
 
+    /// Translucency used for highlighting (Shift+color and the highlighter
+    /// tool), matching Windows ZoomIt's g_AlphaBlend (0x80 = 50%).
+    static let highlightAlpha: CGFloat = 0.5
+
     static let `default` = AnnotationStyle(color: .red, rootWidth: 5, alpha: 1)
 }
 

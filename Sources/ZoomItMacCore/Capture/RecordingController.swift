@@ -193,8 +193,9 @@ final class RecordingController {
     private var captureSession: AVCaptureSession?
     private var engine: RecordingEngine?
     private var borderWindow: NSWindow?
+    private let webcam: WebcamOverlayController
     private let sampleQueue = DispatchQueue(label: "com.zoomitmac.recorder.samples")
-
+    private var clipEditor: VideoClipEditorController?
     init(
         captureService: ScreenCaptureService,
         displayManager: DisplayManager,
@@ -205,6 +206,7 @@ final class RecordingController {
         self.displayManager = displayManager
         self.permissionService = permissionService
         self.settingsStore = settingsStore
+        self.webcam = WebcamOverlayController(permissionService: permissionService)
     }
 
     /// Toggles recording. When starting, `region` chooses whole-screen vs. a
@@ -242,8 +244,12 @@ final class RecordingController {
         // Show the orange recording border first so it's part of our own windows
         // (excluded from capture) before the stream filter is built.
         showBorder(display: display, region: sourceRect)
+        // Show the webcam picture-in-picture overlay (if enabled), positioned
+        // inside the recorded area so it appears within the recording. It's a
+        // normal capturable window so it's captured into the video.
         Task { @MainActor in
             do {
+                await self.webcam.start(settings: self.settingsStore.load(), area: self.recordedArea(display: display, region: sourceRect))
                 try await self.startStreaming(display: display, sourceRect: sourceRect)
                 self.isRecording = true
                 self.onStateChange?(true)
@@ -285,6 +291,19 @@ final class RecordingController {
     private func hideBorder() {
         borderWindow?.orderOut(nil)
         borderWindow = nil
+    }
+
+    /// The recorded area in global (bottom-left origin) screen coordinates: the
+    /// region for a region recording, or the whole display otherwise. `region`
+    /// is in display points with a top-left origin, so its Y is flipped.
+    private func recordedArea(display: DisplayDescriptor, region: CGRect?) -> CGRect {
+        guard let region else { return display.frame }
+        return CGRect(
+            x: display.frame.minX + region.minX,
+            y: display.frame.minY + display.frame.height - region.maxY,
+            width: region.width,
+            height: region.height
+        )
     }
 
     private func startStreaming(display: DisplayDescriptor, sourceRect: CGRect?) async throws {
@@ -388,6 +407,7 @@ final class RecordingController {
         guard isRecording else { return }
         isRecording = false
         hideBorder()
+        webcam.stop()
 
         captureSession?.stopRunning()
         captureSession = nil
@@ -413,9 +433,25 @@ final class RecordingController {
     }
 
     private func presentSave(tempURL: URL) {
-        // Dismiss any zoom overlay first so the dialog isn't hidden behind it.
+        // Dismiss any zoom overlay first so the editor isn't hidden behind it.
         onWillShowSaveDialog?()
+        // Show the clip editor (preview, trim, append) before saving, mirroring
+        // ZoomIt on Windows. The editor exports an edited MP4, which we then
+        // move to the chosen destination.
+        NSApp.activate(ignoringOtherApps: true)
+        let editor = VideoClipEditorController()
+        self.clipEditor = editor
+        editor.present(tempURL: tempURL, suggestedName: suggestedFilename(), onSave: { [weak self] editedURL in
+            self?.clipEditor = nil
+            try? FileManager.default.removeItem(at: tempURL)
+            self?.savePanel(for: editedURL)
+        }, onCancel: { [weak self] in
+            self?.clipEditor = nil
+            try? FileManager.default.removeItem(at: tempURL)
+        })
+    }
 
+    private func savePanel(for tempURL: URL) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = suggestedFilename()
         panel.allowedContentTypes = [.mpeg4Movie]
@@ -442,6 +478,27 @@ final class RecordingController {
         return "ZoomIt \(formatter.string(from: Date())).mp4"
     }
 
+    /// Opens an existing video file in the clip editor (trim, append, save),
+    /// mirroring ZoomIt's standalone "Trim" workflow. The edited result is
+    /// exported and the user picks where to save it.
+    func openForTrim() {
+        let open = NSOpenPanel()
+        open.title = "Trim Video"
+        open.allowedContentTypes = [.mpeg4Movie, .quickTimeMovie]
+        open.canChooseDirectories = false
+        open.allowsMultipleSelection = false
+        NSApp.activate(ignoringOtherApps: true)
+        guard open.runModal() == .OK, let url = open.url else { return }
+        let editor = VideoClipEditorController()
+        self.clipEditor = editor
+        editor.present(tempURL: url, suggestedName: suggestedFilename(), onSave: { [weak self] editedURL in
+            self?.clipEditor = nil
+            self?.savePanel(for: editedURL)
+        }, onCancel: { [weak self] in
+            self?.clipEditor = nil
+        })
+    }
+
     private func selectRegion(on display: DisplayDescriptor, completion: @escaping (CGRect?) -> Void) {
         Task { @MainActor in
             do {
@@ -463,7 +520,10 @@ final class RecordingController {
                     image: frame.image
                 )
                 var holder: NSWindow? = window
+                var cursorLease: CrosshairCursorLease?
                 view.onComplete = { rect in
+                    cursorLease?.invalidate()
+                    cursorLease = nil
                     holder?.orderOut(nil)
                     holder = nil
                     completion(rect)
@@ -472,6 +532,8 @@ final class RecordingController {
                 window.makeKeyAndOrderFront(nil)
                 NSApp.activate(ignoringOtherApps: true)
                 window.makeFirstResponder(view)
+                cursorLease = CrosshairCursorLease(window: window)
+                cursorLease?.activate()
             } catch {
                 completion(nil)
             }
@@ -486,6 +548,7 @@ final class RecordingController {
         streamOutput = nil
         engine = nil
         hideBorder()
+        webcam.stop()
         isRecording = false
     }
 

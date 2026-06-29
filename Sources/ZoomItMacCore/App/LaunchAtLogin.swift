@@ -10,6 +10,18 @@ enum LaunchAtLogin {
         SMAppService.mainApp.status == .enabled
     }
 
+    /// True when macOS already has a registered or pending login item for the
+    /// app, used to migrate the older status-only setting into UserDefaults.
+    static var isEnabledOrPending: Bool {
+        let status = SMAppService.mainApp.status
+        return status == .enabled || status == .requiresApproval
+    }
+
+    /// Best-effort reconciliation of the persisted preference at app launch.
+    static func applySavedPreference(_ enabled: Bool) {
+        try? setEnabled(enabled)
+    }
+
     /// Registers or unregisters the app as a login item.
     static func setEnabled(_ enabled: Bool) throws {
         let service = SMAppService.mainApp
@@ -18,7 +30,7 @@ enum LaunchAtLogin {
                 try service.register()
             }
         } else {
-            if service.status == .enabled {
+            if service.status != .notRegistered {
                 try service.unregister()
             }
         }

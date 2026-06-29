@@ -47,6 +47,10 @@ final class OverlayWindowController {
             // capturing the overlay back into itself, which would otherwise feed
             // the magnified output into the next frame and zoom in infinitely.
             window.sharingType = .none
+        } else {
+            // Static zoom and draw-only overlays must be visible to the recorder
+            // so annotations made during screen recording are captured.
+            window.sharingType = .readOnly
         }
 
         let canvasView = ZoomCanvasView(
