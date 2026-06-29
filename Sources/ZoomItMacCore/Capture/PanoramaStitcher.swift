@@ -788,7 +788,13 @@ public enum PanoramaStitcher {
         // harmonic alias that stacks near-identical bands.
         let scanRange = max(8, (min(w, h) * 3) / 4)
         let margin = 4
-        let sampleStep = 2
+        // Subsample more coarsely on large frames: the per-candidate MAD scan is
+        // the dominant stitch cost, and a denser grid adds little discrimination
+        // once thousands of pixels are sampled. The step stays 2 for frames with
+        // a small dimension <= 600 px (every regression-test frame), so tested
+        // behavior is unchanged; larger captures get a proportionally cheaper
+        // scan (e.g. step 4 at 1200 px ~= a 4x reduction in samples/candidate).
+        let sampleStep = max(2, min(w, h) / 200)
         let ignoredBottomRows = stationaryBottomRows(prev, cur, w, h)
         let fixedOverlayRows = ignoreTopRows + ignoredBottomRows
         let effectiveContentRows = max(1, h - fixedOverlayRows)

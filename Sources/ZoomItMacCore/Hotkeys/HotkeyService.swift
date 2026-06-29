@@ -10,6 +10,7 @@ final class HotkeyService {
     private var liveHotKeyRef: EventHotKeyRef?
     private var snipCopyHotKeyRef: EventHotKeyRef?
     private var snipSaveHotKeyRef: EventHotKeyRef?
+    private var snipOcrHotKeyRef: EventHotKeyRef?
     private var recordHotKeyRef: EventHotKeyRef?
     private var recordRegionHotKeyRef: EventHotKeyRef?
     private var panoramaCopyHotKeyRef: EventHotKeyRef?
@@ -125,6 +126,7 @@ final class HotkeyService {
                 case 10: command = .startPanorama(save: false)
                 case 11: command = .startPanorama(save: true)
                 case 12: command = .toggleBreakTimer
+                case 13: command = .snipOcr
                 default: return noErr
                 }
 
@@ -199,6 +201,20 @@ final class HotkeyService {
             0,
             &snipSaveHotKeyRef
         )
+
+        // OCR snip: recognizes text in the selected region and copies it to the
+        // clipboard. A key code of 0 disables the hotkey, matching ZoomIt.
+        if settings.snipOcrHotKeyCode != 0 {
+            let snipOcrModifiers = NSEvent.ModifierFlags(rawValue: settings.snipOcrHotKeyModifiers)
+            RegisterEventHotKey(
+                UInt32(settings.snipOcrHotKeyCode),
+                carbonModifiers(from: snipOcrModifiers),
+                EventHotKeyID(signature: signature, id: 13),
+                target,
+                0,
+                &snipOcrHotKeyRef
+            )
+        }
 
         // Recording: the base shortcut records the whole screen; the same
         // shortcut with Shift toggled records a selected region.
@@ -276,6 +292,10 @@ final class HotkeyService {
             UnregisterEventHotKey(snipSaveHotKeyRef)
         }
         snipSaveHotKeyRef = nil
+        if let snipOcrHotKeyRef {
+            UnregisterEventHotKey(snipOcrHotKeyRef)
+        }
+        snipOcrHotKeyRef = nil
         if let recordHotKeyRef {
             UnregisterEventHotKey(recordHotKeyRef)
         }

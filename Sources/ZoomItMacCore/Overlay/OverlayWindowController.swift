@@ -129,12 +129,12 @@ final class OverlayWindowController {
     }
     /// Begins a region snip on the current viewport (used when the snip hotkey is
     /// pressed while already zoomed). `onFinished` is called when it ends.
-    func beginRegionSnip(save: Bool, onFinished: @escaping () -> Void) {
+    func beginRegionSnip(action: SnipAction, onFinished: @escaping () -> Void) {
         guard let canvasView else {
             onFinished()
             return
         }
-        canvasView.beginRegionSnip(save: save, onFinished: onFinished)
+        canvasView.beginRegionSnip(action: action, onFinished: onFinished)
     }
     /// The overlay's window number, used to exclude it from live screen capture
     /// so the magnified overlay is never captured back into itself.

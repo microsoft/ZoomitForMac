@@ -33,12 +33,12 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
     private var onSave: ((URL) -> Void)?
     private var onCancel: (() -> Void)?
     private var suggestedName = "ZoomIt.mp4"
-    private var preferredWindowLevel: NSWindow.Level = .floating
+    private var preferredWindowLevel: NSWindow.Level = .normal
 
     /// Shows the editor for `tempURL`. Calls `onSave` with an exported MP4 of the
     /// edited result, or `onCancel` if dismissed.
     func present(tempURL: URL, suggestedName: String,
-                 windowLevel: NSWindow.Level = .floating,
+                 windowLevel: NSWindow.Level = .normal,
                  onSave: @escaping (URL) -> Void, onCancel: @escaping () -> Void) {
         self.onSave = onSave
         self.onCancel = onCancel
@@ -64,12 +64,11 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         win.delegate = self
         win.center()
         win.isReleasedWhenClosed = false
-        // Keep the editor above other apps and on every Space so it can't get
-        // lost behind windows when the user switches away (this app has no Dock
-        // tile to return through).
+        // A normal-level window with a Dock tile: the user can switch away and
+        // return to it through the Dock or Cmd-Tab, so it is not pinned above
+        // other apps.
         win.level = preferredWindowLevel
         win.hidesOnDeactivate = false
-        win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let content = NSView()
         win.contentView = content
@@ -160,15 +159,13 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         self.window = win
         // Become a regular app while editing so the window appears in the Dock
         // and Cmd-Tab, letting the user switch away and return; restored to
-        // accessory on close. Switching from .accessory needs a runloop hop and
-        // a re-activate to make the Dock tile appear reliably.
+        // accessory on close. Switching from .accessory needs a runloop hop to
+        // make the Dock tile appear reliably.
         win.makeKeyAndOrderFront(nil)
         DispatchQueue.main.async {
             ZoomItAppIcon.apply()
             NSApp.setActivationPolicy(.regular)
             ZoomItAppIcon.apply()
-            NSApp.activate(ignoringOtherApps: true)
-            win.level = self.preferredWindowLevel
             win.makeKeyAndOrderFront(nil)
         }
         syncTimeline()

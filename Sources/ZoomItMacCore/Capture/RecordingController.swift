@@ -947,12 +947,11 @@ final class RecordingController {
     private func presentClipEditor(tempURL: URL) {
         // Show the clip editor (preview, trim, append) before saving, mirroring
         // ZoomIt on Windows. The editor exports an edited MP4, which we then
-        // move to the chosen destination.
-        NSApp.activate(ignoringOtherApps: true)
+        // move to the chosen destination. It opens as a normal window with a
+        // Dock tile, so the user can switch away and return to it as needed.
         let editor = VideoClipEditorController()
         self.clipEditor = editor
-        let editorLevel = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 2)
-        editor.present(tempURL: tempURL, suggestedName: suggestedFilename(), windowLevel: editorLevel, onSave: { [weak self] editedURL in
+        editor.present(tempURL: tempURL, suggestedName: suggestedFilename(), onSave: { [weak self] editedURL in
             self?.clipEditor = nil
             try? FileManager.default.removeItem(at: tempURL)
             self?.savePanel(for: editedURL)

@@ -172,6 +172,14 @@ final class SnipSelectionView: NSView {
     }
 }
 
+/// What to do with a selected region: copy the image, save it to a file, or
+/// recognize its text and copy that to the clipboard (OCR).
+enum SnipAction {
+    case copyImage
+    case saveImage
+    case recognizeText
+}
+
 /// Drives the region snip: captures the active display, shows the selection
 /// overlay, and copies or saves the chosen region when the drag is released.
 @MainActor
@@ -182,7 +190,7 @@ final class SnipController {
 
     private var window: NSWindow?
     private var capturedFrame: CapturedFrame?
-    private var saveToFile = false
+    private var action: SnipAction = .copyImage
     private var onFinished: (() -> Void)?
     private var cursorLease: CrosshairCursorLease?
 
@@ -196,13 +204,14 @@ final class SnipController {
         self.permissionService = permissionService
     }
 
-    /// Begins a region selection. `save` chooses between saving to a file and
-    /// copying to the clipboard. When `frame` is supplied (e.g. a snapshot of the
-    /// zoomed viewport) it is selected directly; otherwise the active display is
-    /// captured. `onFinished` is always called once, when the selection
-    /// completes or is cancelled.
-    func begin(save: Bool, frame providedFrame: CapturedFrame? = nil, onFinished: @escaping () -> Void) {
-        self.saveToFile = save
+    /// Begins a region selection. `action` chooses what to do with the selected
+    /// region: copy the image, save it to a file, or OCR it to the clipboard.
+    /// When `frame` is supplied (e.g. a snapshot of the zoomed viewport) it is
+    /// selected directly; otherwise the active display is captured.
+    /// `onFinished` is always called once, when the selection completes or is
+    /// cancelled.
+    func begin(action: SnipAction, frame providedFrame: CapturedFrame? = nil, onFinished: @escaping () -> Void) {
+        self.action = action
         self.onFinished = onFinished
 
         if let providedFrame {
@@ -287,10 +296,13 @@ final class SnipController {
             return
         }
 
-        if saveToFile {
+        switch action {
+        case .saveImage:
             ImageExporter.presentSavePanel(for: cropped)
-        } else {
+        case .copyImage:
             ImageExporter.copyToPasteboard(cropped)
+        case .recognizeText:
+            OcrService.recognizeAndCopy(cropped)
         }
         finish()
     }

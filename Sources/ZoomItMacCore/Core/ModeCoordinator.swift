@@ -111,7 +111,9 @@ final class ModeCoordinator {
             annotationController.clear()
             overlayController.requestRedraw()
         case .snipRegion(let save):
-            startSnip(save: save)
+            startSnip(action: save ? .saveImage : .copyImage)
+        case .snipOcr:
+            startSnip(action: .recognizeText)
         case .toggleRecording(let region):
             toggleRecording(region: region)
         case .startPanorama(let save):
@@ -149,8 +151,6 @@ final class ModeCoordinator {
             annotationController.decreaseFontSize()
             saveCurrentTypingFontSize()
             overlayController.requestRedraw()
-        case .captureStill:
-            NSSound.beep()
         }
     }
 
@@ -401,7 +401,7 @@ final class ModeCoordinator {
     /// Starts a region snip. From idle it captures the screen; while zoomed it
     /// selects within the current viewport so ZoomIt's own overlay is reused
     /// rather than captured.
-    private func startSnip(save: Bool) {
+    private func startSnip(action: SnipAction) {
         guard !isSnipping else {
             NSSound.beep()
             return
@@ -409,12 +409,12 @@ final class ModeCoordinator {
         switch mode {
         case .idle:
             isSnipping = true
-            snipController.begin(save: save) { [weak self] in
+            snipController.begin(action: action) { [weak self] in
                 self?.isSnipping = false
             }
         case .staticZoom, .liveZoom, .drawOnly, .typing:
             isSnipping = true
-            overlayController.beginRegionSnip(save: save) { [weak self] in
+            overlayController.beginRegionSnip(action: action) { [weak self] in
                 self?.isSnipping = false
             }
         default:

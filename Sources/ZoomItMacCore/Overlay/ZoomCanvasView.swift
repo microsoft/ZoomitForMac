@@ -23,7 +23,7 @@ final class ZoomCanvasView: NSView {
     /// Region-snip state: while active, a drag selects a rectangle of the
     /// current viewport to copy or save.
     private var isSelectingRegion = false
-    private var regionSaveToFile = false
+    private var regionAction: SnipAction = .copyImage
     private var regionAnchor: CGPoint?
     private var regionRect: CGRect = .zero
     private var regionCursorLease: CrosshairCursorLease?
@@ -749,8 +749,8 @@ final class ZoomCanvasView: NSView {
     // MARK: - Region snip
 
     /// Begins selecting a rectangle of the current viewport to copy or save.
-    func beginRegionSnip(save: Bool, onFinished: @escaping () -> Void) {
-        regionSaveToFile = save
+    func beginRegionSnip(action: SnipAction, onFinished: @escaping () -> Void) {
+        regionAction = action
         onRegionSnipFinished = onFinished
         regionAnchor = nil
         regionRect = .zero
@@ -776,7 +776,7 @@ final class ZoomCanvasView: NSView {
 
     private func finishRegionSnip() {
         let rect = regionRect
-        let save = regionSaveToFile
+        let action = regionAction
         isSelectingRegion = false
         regionRect = .zero
         regionAnchor = nil
@@ -791,10 +791,13 @@ final class ZoomCanvasView: NSView {
                 height: rect.height * scale
             ).integral
             if let cropped = full.cropping(to: pixelRect) {
-                if save {
+                switch action {
+                case .saveImage:
                     presentSavePanelOverOverlay(cropped)
-                } else {
+                case .copyImage:
                     ImageExporter.copyToPasteboard(cropped)
+                case .recognizeText:
+                    OcrService.recognizeAndCopy(cropped)
                 }
             }
         }
