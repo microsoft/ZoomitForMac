@@ -94,7 +94,7 @@ private final class RecordingEngine: @unchecked Sendable {
     func appendVideo(_ box: SampleBufferBox) {
         queue.async {
             guard !self.finished, self.writer.status == .writing,
-                  let sampleBuffer = self.retimedSampleBuffer(box.buffer) else { return }
+                  let sampleBuffer = self.retimedVideoSampleBuffer(box.buffer) else { return }
             self.appendVideoOnQueue(sampleBuffer)
         }
     }
@@ -102,7 +102,7 @@ private final class RecordingEngine: @unchecked Sendable {
     func appendVideoImage(_ frame: RecordingImageFrame) {
         queue.async {
             guard !self.finished, self.writer.status == .writing else { return }
-            let presentationTime = self.normalizedPresentationTime(for: frame.presentationTime)
+            let presentationTime = self.nextVideoPresentationTime()
             guard let sampleBuffer = self.makeSampleBuffer(from: frame.image, presentationTime: presentationTime, duration: frame.duration) else { return }
             self.appendVideoOnQueue(sampleBuffer)
         }
@@ -111,7 +111,7 @@ private final class RecordingEngine: @unchecked Sendable {
     func appendVideoImageIfNeeded(_ frame: RecordingImageFrame) {
         queue.async {
             guard !self.hasVideoSample, !self.finished, self.writer.status == .writing else { return }
-            let presentationTime = self.normalizedPresentationTime(for: frame.presentationTime)
+            let presentationTime = self.nextVideoPresentationTime()
             guard let sampleBuffer = self.makeSampleBuffer(from: frame.image, presentationTime: presentationTime, duration: frame.duration) else { return }
             self.appendVideoOnQueue(sampleBuffer)
         }
@@ -120,12 +120,7 @@ private final class RecordingEngine: @unchecked Sendable {
     func appendVideoImageAtEnd(_ frame: RecordingImageFrame) {
         queue.async {
             guard !self.finished, self.writer.status == .writing else { return }
-            let presentationTime: CMTime
-            if let lastVideoPresentationTime = self.lastVideoPresentationTime {
-                presentationTime = CMTimeAdd(lastVideoPresentationTime, self.lastVideoDuration)
-            } else {
-                presentationTime = self.normalizedPresentationTime(for: frame.presentationTime)
-            }
+            let presentationTime = self.nextVideoPresentationTime()
             guard let sampleBuffer = self.makeSampleBuffer(
                 from: frame.image,
                 presentationTime: presentationTime,
@@ -139,7 +134,7 @@ private final class RecordingEngine: @unchecked Sendable {
         queue.async {
             guard !self.hasVideoSample, !self.finished, self.writer.status == .writing,
                   let image = self.makeBlackImage(),
-                  let sampleBuffer = self.makeSampleBuffer(from: image, presentationTime: self.normalizedPresentationTime(for: presentationTime), duration: recordingSyntheticFrameDuration) else { return }
+                  let sampleBuffer = self.makeSampleBuffer(from: image, presentationTime: self.nextVideoPresentationTime(), duration: recordingSyntheticFrameDuration) else { return }
             self.appendVideoOnQueue(sampleBuffer)
         }
     }
@@ -222,10 +217,29 @@ private final class RecordingEngine: @unchecked Sendable {
         return .zero
     }
 
+    private func nextVideoPresentationTime() -> CMTime {
+        guard let lastVideoPresentationTime else { return .zero }
+        return CMTimeAdd(lastVideoPresentationTime, lastVideoDuration)
+    }
+
+    private func monotonicVideoPresentationTime(for sourceTime: CMTime) -> CMTime {
+        let normalizedTime = normalizedPresentationTime(for: sourceTime)
+        guard let lastVideoPresentationTime else { return normalizedTime }
+        return CMTimeCompare(normalizedTime, lastVideoPresentationTime) > 0 ? normalizedTime : nextVideoPresentationTime()
+    }
+
+    private func retimedVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
+        retimedSampleBuffer(sampleBuffer, presentationTime: monotonicVideoPresentationTime(for: CMSampleBufferGetPresentationTimeStamp(sampleBuffer)))
+    }
+
     private func retimedSampleBuffer(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
+        retimedSampleBuffer(sampleBuffer, presentationTime: normalizedPresentationTime(for: CMSampleBufferGetPresentationTimeStamp(sampleBuffer)))
+    }
+
+    private func retimedSampleBuffer(_ sampleBuffer: CMSampleBuffer, presentationTime: CMTime) -> CMSampleBuffer? {
         var timing = CMSampleTimingInfo(
             duration: effectiveDuration(for: sampleBuffer),
-            presentationTimeStamp: normalizedPresentationTime(for: CMSampleBufferGetPresentationTimeStamp(sampleBuffer)),
+            presentationTimeStamp: presentationTime,
             decodeTimeStamp: .invalid
         )
         var retimed: CMSampleBuffer?
