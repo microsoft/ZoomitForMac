@@ -131,13 +131,21 @@ final class ModeCoordinator {
             overlayController.requestRedraw()
         case .increaseFontSize:
             annotationController.increaseFontSize()
+            saveCurrentTypingFontSize()
             overlayController.requestRedraw()
         case .decreaseFontSize:
             annotationController.decreaseFontSize()
+            saveCurrentTypingFontSize()
             overlayController.requestRedraw()
         case .captureStill:
             NSSound.beep()
         }
+    }
+
+    private func saveCurrentTypingFontSize() {
+        var settings = settingsStore.load()
+        settings.typingFontSize = annotationController.typingFontSize
+        settingsStore.save(settings)
     }
 
     private func activateStaticZoom() {
@@ -159,7 +167,7 @@ final class ModeCoordinator {
 
         Task { @MainActor in
             do {
-                let frame = try await captureService.captureDisplay(display)
+                let frame = try await captureDisplayForOverlay(display)
                 let settings = settingsStore.load()
                 viewportController.configure(for: frame, initialZoom: settings.defaultZoomFactor)
                 annotationController.reset()
@@ -184,6 +192,9 @@ final class ModeCoordinator {
                     overlayController.runZoomAnimation()
                 }
             } catch {
+                if mode == .idle {
+                    recordingController.setWebcamExcludedFromScreenCapture(false)
+                }
                 presentError(error)
             }
         }
@@ -210,7 +221,7 @@ final class ModeCoordinator {
             do {
                 // Capture one still frame for the initial display, then let the
                 // live stream keep refreshing the magnified content.
-                let frame = try await captureService.captureDisplay(display)
+                let frame = try await captureDisplayForOverlay(display)
                 let settings = settingsStore.load()
                 viewportController.configure(for: frame, initialZoom: settings.defaultZoomFactor)
                 annotationController.reset()
@@ -231,15 +242,19 @@ final class ModeCoordinator {
                 mode = .liveZoom
                 overlayController.updateInteractionMode(.liveZoom)
 
-                // Start streaming live frames into the overlay. The session
-                // excludes our own app so the overlay is never captured back
+                // Start streaming live frames into the overlay. The stream
+                // excludes the overlay window so it is never captured back
                 // into itself.
                 let session = LiveCaptureSession { [weak self] image in
                     guard let self, self.mode == .liveZoom || self.isExiting else { return }
                     self.overlayController.updateLiveImage(image)
                 }
                 liveCaptureSession = session
-                try await session.start(display: display, excludingWindowNumber: overlayController.overlayWindowNumber)
+                let excludedWindowNumbers = [
+                    overlayController.overlayWindowNumber,
+                    recordingController.webcamWindowNumberForScreenCaptureExclusion
+                ].compactMap { $0 }
+                try await session.start(display: display, excludingWindowNumbers: excludedWindowNumbers)
 
                 // Enable Control+Up/Down zoom while live zoom is on screen.
                 onBeginLiveZoomNavigation?()
@@ -248,6 +263,9 @@ final class ModeCoordinator {
                     overlayController.runZoomAnimation()
                 }
             } catch {
+                if mode == .idle {
+                    recordingController.setWebcamExcludedFromScreenCapture(false)
+                }
                 stopLiveCapture()
                 presentError(error)
             }
@@ -281,7 +299,7 @@ final class ModeCoordinator {
 
         Task { @MainActor in
             do {
-                let frame = try await captureService.captureDisplay(display)
+                let frame = try await captureDisplayForOverlay(display)
                 let settings = settingsStore.load()
                 // Draw-without-zoom freezes the screen at 1x and goes straight
                 // into drawing mode; there is no magnification or animation.
@@ -301,6 +319,9 @@ final class ModeCoordinator {
                 // Arm drawing mode immediately so the first click starts a stroke.
                 overlayController.updateInteractionMode(.drawOnly)
             } catch {
+                if mode == .idle {
+                    recordingController.setWebcamExcludedFromScreenCapture(false)
+                }
                 presentError(error)
             }
         }
@@ -347,6 +368,13 @@ final class ModeCoordinator {
         }
     }
 
+    private func captureDisplayForOverlay(_ display: DisplayDescriptor) async throws -> CapturedFrame {
+        let excludedWindowNumbers = recordingController.webcamWindowNumberForScreenCaptureExclusion.map { [$0] } ?? []
+        let frame = try await captureService.captureDisplay(display, excludingWindowNumbers: excludedWindowNumbers)
+        recordingController.setWebcamExcludedFromScreenCapture(true)
+        return frame
+    }
+
     private func animateExit() {
         guard mode != .idle, !isExiting else { return }
         isExiting = true
@@ -361,6 +389,7 @@ final class ModeCoordinator {
         stopLiveCapture()
         overlayController.close()
         annotationController.reset()
+        recordingController.setWebcamExcludedFromScreenCapture(false)
         mode = .idle
         isExiting = false
     }
@@ -401,10 +430,14 @@ final class ModeCoordinator {
     private func toggleRecording(region: Bool) {
         // Make sure the Save dialog (shown after stopping) isn't hidden behind a
         // zoom overlay by dismissing any active overlay first.
-        recordingController.onWillShowSaveDialog = { [weak self] in
-            guard let self, self.mode != .idle else { return }
-            self.exitActiveMode()
+        recordingController.overlayFrameProvider = { [weak self] sourceRect in
+            self?.overlayController.captureFrameForRecording(sourceRect: sourceRect)
         }
+        recordingController.onWillShowSaveDialog = { [weak self] in
+            self?.overlayController.prepareForPresentedWindow()
+            self?.exitActiveMode()
+        }
+        recordingController.setWebcamExcludedFromScreenCapture(mode != .idle)
         recordingController.toggle(region: region) { [weak self] recording in
             self?.onRecordingStateChanged?(recording)
         }

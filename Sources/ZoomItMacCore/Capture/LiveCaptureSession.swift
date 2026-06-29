@@ -29,23 +29,18 @@ final class LiveCaptureSession: NSObject, SCStreamOutput, @unchecked Sendable {
     }
 
     @MainActor
-    func start(display: DisplayDescriptor, excludingWindowNumber: Int? = nil) async throws {
+    func start(display: DisplayDescriptor, excludingWindowNumbers: [Int] = []) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let captureDisplay = content.displays.first(where: { $0.displayID == display.id }) else {
             throw ScreenCaptureError.displayNotFound
         }
 
-        // Exclude every window owned by our own process (the magnified overlay,
-        // the menu-bar item, etc.) so the live stream never captures the overlay
-        // back into itself. Without this, each captured frame contains the
-        // already-magnified overlay, which is then magnified again, tunnelling in
-        // infinitely until the screen degrades to a solid color. The overlay is
-        // also matched by window number directly in case its owning application
-        // is not reported for the screen-saver-level window.
-        let ownPID = getpid()
-        let excludedWindowID = excludingWindowNumber.map { CGWindowID($0) }
+        // Exclude only ZoomIt's source-capture windows by ID: the live overlay
+        // to prevent feedback, plus the webcam PiP when recording so it stays a
+        // fixed overlay instead of becoming part of the magnified source.
+        let excludedWindowIDs = Set(excludingWindowNumbers.map { CGWindowID($0) })
         let ownWindows = content.windows.filter { window in
-            window.owningApplication?.processID == ownPID || window.windowID == excludedWindowID
+            excludedWindowIDs.contains(window.windowID)
         }
         let filter = SCContentFilter(display: captureDisplay, excludingWindows: ownWindows)
 

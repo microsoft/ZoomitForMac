@@ -302,6 +302,16 @@ final class ZoomCanvasView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        if interactionMode == .typing {
+            if event.scrollingDeltaY > 0 {
+                commandSink(.increaseFontSize)
+            } else if event.scrollingDeltaY < 0 {
+                commandSink(.decreaseFontSize)
+            }
+            needsDisplay = true
+            return
+        }
+
         if isDrawingMode {
             if event.scrollingDeltaY > 0 {
                 commandSink(.increasePenWidth)
@@ -717,6 +727,23 @@ final class ZoomCanvasView: NSView {
         guard let rep = bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
         cacheDisplay(in: bounds, to: rep)
         return rep.cgImage
+    }
+
+    /// Snapshots the visible overlay for the recorder. `sourceRect` is a region
+    /// recording crop in display points with a top-left origin.
+    func captureRecordingImage(sourceRect: CGRect?) -> CGImage? {
+        displayIfNeeded()
+        guard let image = captureViewportImage() else { return nil }
+        guard let sourceRect else { return image }
+
+        let scale = window?.backingScaleFactor ?? capturedFrame.display.scaleFactor
+        let pixelRect = CGRect(
+            x: sourceRect.minX * scale,
+            y: sourceRect.minY * scale,
+            width: sourceRect.width * scale,
+            height: sourceRect.height * scale
+        ).integral
+        return image.cropping(to: pixelRect)
     }
 
     // MARK: - Region snip

@@ -277,7 +277,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         stack.alignment = .leading
         stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 24, right: 16)
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 12, right: 16)
         return stack
     }
 

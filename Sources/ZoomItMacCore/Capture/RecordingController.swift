@@ -9,6 +9,20 @@ private struct SampleBufferBox: @unchecked Sendable {
     let buffer: CMSampleBuffer
 }
 
+private let recordingSyntheticFrameDuration = CMTime(value: 1, timescale: 10)
+
+private struct RecordingImageFrame: @unchecked Sendable {
+    let image: CGImage
+    let presentationTime: CMTime
+    let duration: CMTime
+
+    init(image: CGImage, presentationTime: CMTime, duration: CMTime = recordingSyntheticFrameDuration) {
+        self.image = image
+        self.presentationTime = presentationTime
+        self.duration = duration
+    }
+}
+
 /// Owns the AVAssetWriter and serialises all sample appends on its own queue so
 /// it can safely receive buffers from the ScreenCaptureKit and microphone
 /// capture callbacks (which run on background queues).
@@ -19,14 +33,23 @@ private final class RecordingEngine: @unchecked Sendable {
     private let videoInput: AVAssetWriterInput
     private let systemAudioInput: AVAssetWriterInput?
     private let micInput: AVAssetWriterInput?
+    private let videoSettings: [String: Any]
+    private let width: Int
+    private let height: Int
+    private var sourceStartTime: CMTime?
     private var sessionStarted = false
+    private var hasVideoSample = false
+    private var lastVideoPresentationTime: CMTime?
+    private var lastVideoDuration = recordingSyntheticFrameDuration
     private var finished = false
 
     init(url: URL, width: Int, height: Int, systemAudio: Bool, microphone: Bool) throws {
         self.url = url
+        self.width = width
+        self.height = height
         writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
 
-        let videoSettings: [String: Any] = [
+        videoSettings = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: width,
             AVVideoHeightKey: height
@@ -59,21 +82,72 @@ private final class RecordingEngine: @unchecked Sendable {
         }
     }
 
-    func startWriting() {
-        queue.async {
-            self.writer.startWriting()
+    func startWriting() async {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                self.writer.startWriting()
+                continuation.resume()
+            }
         }
     }
 
     func appendVideo(_ box: SampleBufferBox) {
         queue.async {
+            guard !self.finished, self.writer.status == .writing,
+                  let sampleBuffer = self.retimedSampleBuffer(box.buffer) else { return }
+            self.appendVideoOnQueue(sampleBuffer)
+        }
+    }
+
+    func appendVideoImage(_ frame: RecordingImageFrame) {
+        queue.async {
             guard !self.finished, self.writer.status == .writing else { return }
-            if !self.sessionStarted {
-                self.sessionStarted = true
-                self.writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(box.buffer))
+            let presentationTime = self.normalizedPresentationTime(for: frame.presentationTime)
+            guard let sampleBuffer = self.makeSampleBuffer(from: frame.image, presentationTime: presentationTime, duration: frame.duration) else { return }
+            self.appendVideoOnQueue(sampleBuffer)
+        }
+    }
+
+    func appendVideoImageIfNeeded(_ frame: RecordingImageFrame) {
+        queue.async {
+            guard !self.hasVideoSample, !self.finished, self.writer.status == .writing else { return }
+            let presentationTime = self.normalizedPresentationTime(for: frame.presentationTime)
+            guard let sampleBuffer = self.makeSampleBuffer(from: frame.image, presentationTime: presentationTime, duration: frame.duration) else { return }
+            self.appendVideoOnQueue(sampleBuffer)
+        }
+    }
+
+    func appendVideoImageAtEnd(_ frame: RecordingImageFrame) {
+        queue.async {
+            guard !self.finished, self.writer.status == .writing else { return }
+            let presentationTime: CMTime
+            if let lastVideoPresentationTime = self.lastVideoPresentationTime {
+                presentationTime = CMTimeAdd(lastVideoPresentationTime, self.lastVideoDuration)
+            } else {
+                presentationTime = self.normalizedPresentationTime(for: frame.presentationTime)
             }
-            if self.videoInput.isReadyForMoreMediaData {
-                self.videoInput.append(box.buffer)
+            guard let sampleBuffer = self.makeSampleBuffer(
+                from: frame.image,
+                presentationTime: presentationTime,
+                duration: frame.duration
+            ) else { return }
+            self.appendVideoOnQueue(sampleBuffer)
+        }
+    }
+
+    func appendBlackVideoFrameIfNeeded(presentationTime: CMTime) {
+        queue.async {
+            guard !self.hasVideoSample, !self.finished, self.writer.status == .writing,
+                  let image = self.makeBlackImage(),
+                  let sampleBuffer = self.makeSampleBuffer(from: image, presentationTime: self.normalizedPresentationTime(for: presentationTime), duration: recordingSyntheticFrameDuration) else { return }
+            self.appendVideoOnQueue(sampleBuffer)
+        }
+    }
+
+    func waitForQueuedAppends() async {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume()
             }
         }
     }
@@ -81,33 +155,208 @@ private final class RecordingEngine: @unchecked Sendable {
     func appendSystemAudio(_ box: SampleBufferBox) {
         queue.async {
             guard self.sessionStarted, !self.finished, self.writer.status == .writing,
-                  let input = self.systemAudioInput, input.isReadyForMoreMediaData else { return }
-            input.append(box.buffer)
+                  let input = self.systemAudioInput, input.isReadyForMoreMediaData,
+                  let sampleBuffer = self.retimedSampleBuffer(box.buffer) else { return }
+            input.append(sampleBuffer)
         }
     }
 
     func appendMicrophone(_ box: SampleBufferBox) {
         queue.async {
             guard self.sessionStarted, !self.finished, self.writer.status == .writing,
-                  let input = self.micInput, input.isReadyForMoreMediaData else { return }
-            input.append(box.buffer)
+                  let input = self.micInput, input.isReadyForMoreMediaData,
+                  let sampleBuffer = self.retimedSampleBuffer(box.buffer) else { return }
+            input.append(sampleBuffer)
         }
     }
 
     func finish(completion: @escaping @Sendable (URL?) -> Void) {
         queue.async {
             guard !self.finished, self.writer.status == .writing else {
-                completion(nil)
+                self.writeFallbackMovie(completion: completion)
                 return
             }
             self.finished = true
+            if let endTime = self.endSessionTime() {
+                self.writer.endSession(atSourceTime: endTime)
+            }
             self.videoInput.markAsFinished()
             self.systemAudioInput?.markAsFinished()
             self.micInput?.markAsFinished()
             let url = self.url
             self.writer.finishWriting {
-                completion(self.writer.status == .completed ? url : nil)
+                if self.writer.status == .completed {
+                    completion(url)
+                } else {
+                    self.writeFallbackMovie(completion: completion)
+                }
             }
+        }
+    }
+
+    private func appendVideoOnQueue(_ sampleBuffer: CMSampleBuffer) {
+        if !sessionStarted {
+            sessionStarted = true
+            writer.startSession(atSourceTime: .zero)
+        }
+        if videoInput.isReadyForMoreMediaData, videoInput.append(sampleBuffer) {
+            hasVideoSample = true
+            lastVideoPresentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            lastVideoDuration = effectiveDuration(for: sampleBuffer)
+        }
+    }
+
+    private func normalizedPresentationTime(for sourceTime: CMTime) -> CMTime {
+        let validSourceTime = sourceTime.isValid && sourceTime.isNumeric ? sourceTime : (sourceStartTime ?? .zero)
+        guard let start = sourceStartTime else {
+            sourceStartTime = validSourceTime
+            return .zero
+        }
+        let relativeTime = CMTimeSubtract(validSourceTime, start)
+        if relativeTime.isValid, relativeTime.isNumeric, CMTimeCompare(relativeTime, .zero) >= 0 {
+            return relativeTime
+        }
+        if let lastVideoPresentationTime {
+            return CMTimeAdd(lastVideoPresentationTime, lastVideoDuration)
+        }
+        return .zero
+    }
+
+    private func retimedSampleBuffer(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
+        var timing = CMSampleTimingInfo(
+            duration: effectiveDuration(for: sampleBuffer),
+            presentationTimeStamp: normalizedPresentationTime(for: CMSampleBufferGetPresentationTimeStamp(sampleBuffer)),
+            decodeTimeStamp: .invalid
+        )
+        var retimed: CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: sampleBuffer,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleBufferOut: &retimed
+        ) == noErr else { return nil }
+        return retimed
+    }
+
+    private func effectiveDuration(for sampleBuffer: CMSampleBuffer) -> CMTime {
+        let duration = CMSampleBufferGetDuration(sampleBuffer)
+        if duration.isValid, duration.isNumeric, CMTimeCompare(duration, .zero) > 0 {
+            return duration
+        }
+        return recordingSyntheticFrameDuration
+    }
+
+    private func endSessionTime() -> CMTime? {
+        guard let lastVideoPresentationTime else { return nil }
+        let endTime = CMTimeAdd(lastVideoPresentationTime, lastVideoDuration)
+        return endTime.isValid && endTime.isNumeric ? endTime : nil
+    }
+
+    private func makeSampleBuffer(from image: CGImage, presentationTime: CMTime, duration: CMTime = .invalid) -> CMSampleBuffer? {
+        let attributes: [CFString: Any] = [
+            kCVPixelBufferCGImageCompatibilityKey: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey: true,
+            kCVPixelBufferIOSurfacePropertiesKey: [:]
+        ]
+        var pixelBuffer: CVPixelBuffer?
+        guard CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            width,
+            height,
+            kCVPixelFormatType_32BGRA,
+            attributes as CFDictionary,
+            &pixelBuffer
+        ) == kCVReturnSuccess, let pixelBuffer else { return nil }
+
+        CVPixelBufferLockBaseAddress(pixelBuffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return nil }
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        guard let context = CGContext(
+            data: base,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var description: CMVideoFormatDescription?
+        guard CMVideoFormatDescriptionCreateForImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: pixelBuffer,
+            formatDescriptionOut: &description
+        ) == noErr, let description else { return nil }
+
+        var timing = CMSampleTimingInfo(
+            duration: duration,
+            presentationTimeStamp: presentationTime,
+            decodeTimeStamp: .invalid
+        )
+        var sampleBuffer: CMSampleBuffer?
+        guard CMSampleBufferCreateReadyWithImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: pixelBuffer,
+            formatDescription: description,
+            sampleTiming: &timing,
+            sampleBufferOut: &sampleBuffer
+        ) == noErr else { return nil }
+        return sampleBuffer
+    }
+
+    private func makeBlackImage() -> CGImage? {
+        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        context.setFillColor(NSColor.black.cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
+
+    private func writeFallbackMovie(completion: @escaping @Sendable (URL?) -> Void) {
+        try? FileManager.default.removeItem(at: url)
+        do {
+            let fallbackWriter = try AVAssetWriter(outputURL: url, fileType: .mp4)
+            let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+            input.expectsMediaDataInRealTime = false
+            guard fallbackWriter.canAdd(input), let image = makeBlackImage() else {
+                completion(nil)
+                return
+            }
+            fallbackWriter.add(input)
+            fallbackWriter.startWriting()
+            fallbackWriter.startSession(atSourceTime: .zero)
+            guard let sampleBuffer = makeSampleBuffer(
+                from: image,
+                presentationTime: .zero,
+                duration: CMTime(value: 1, timescale: 10)
+            ), input.append(sampleBuffer) else {
+                fallbackWriter.cancelWriting()
+                completion(nil)
+                return
+            }
+            fallbackWriter.endSession(atSourceTime: recordingSyntheticFrameDuration)
+            input.markAsFinished()
+            nonisolated(unsafe) let writerForCompletion = fallbackWriter
+            fallbackWriter.finishWriting {
+                completion(writerForCompletion.status == .completed ? self.url : nil)
+            }
+        } catch {
+            completion(nil)
         }
     }
 }
@@ -115,7 +364,20 @@ private final class RecordingEngine: @unchecked Sendable {
 /// Forwards ScreenCaptureKit video and system-audio buffers to the engine.
 private final class RecordingStreamOutput: NSObject, SCStreamOutput, @unchecked Sendable {
     private let engine: RecordingEngine
-    init(engine: RecordingEngine) { self.engine = engine }
+    private let overlayFrameProvider: (@MainActor @Sendable () -> CGImage?)?
+    private let stateLock = NSLock()
+    private var overlayActive = false
+    private var overlayFramePending = false
+    private var lastOverlayProbeTime: CMTime?
+    private var lastOverlayFrameTime: CMTime?
+
+    private static let overlayFrameInterval = CMTime(value: 1, timescale: 10)
+    private static let inactiveOverlayProbeInterval = CMTime(value: 1, timescale: 4)
+
+    init(engine: RecordingEngine, overlayFrameProvider: (@MainActor @Sendable () -> CGImage?)?) {
+        self.engine = engine
+        self.overlayFrameProvider = overlayFrameProvider
+    }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard sampleBuffer.isValid else { return }
@@ -126,7 +388,13 @@ private final class RecordingStreamOutput: NSObject, SCStreamOutput, @unchecked 
             guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
                   let statusRaw = attachments.first?[.status] as? Int,
                   statusRaw == SCFrameStatus.complete.rawValue else { return }
-            engine.appendVideo(SampleBufferBox(buffer: sampleBuffer))
+            let box = SampleBufferBox(buffer: sampleBuffer)
+            guard let overlayFrameProvider else {
+                engine.appendVideo(box)
+                return
+            }
+            let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            handleScreenFrame(box, presentationTime: presentationTime, overlayFrameProvider: overlayFrameProvider)
         case .audio:
             engine.appendSystemAudio(SampleBufferBox(buffer: sampleBuffer))
         default:
@@ -136,6 +404,95 @@ private final class RecordingStreamOutput: NSObject, SCStreamOutput, @unchecked 
                 engine.appendMicrophone(SampleBufferBox(buffer: sampleBuffer))
             }
         }
+    }
+
+    private func handleScreenFrame(
+        _ box: SampleBufferBox,
+        presentationTime: CMTime,
+        overlayFrameProvider: @escaping @MainActor @Sendable () -> CGImage?
+    ) {
+        stateLock.lock()
+        let isOverlayActive = overlayActive
+
+        if !isOverlayActive {
+            let shouldProbe = !overlayFramePending && shouldProbeInactiveOverlay(at: presentationTime)
+            if shouldProbe {
+                overlayFramePending = true
+                lastOverlayProbeTime = presentationTime
+            }
+            stateLock.unlock()
+
+            if shouldProbe {
+                Task { @MainActor in
+                    let image = overlayFrameProvider()
+                    self.finishOverlayFrame(image: image, fallback: box, presentationTime: presentationTime)
+                }
+            } else {
+                engine.appendVideo(box)
+            }
+            return
+        }
+
+        if overlayFramePending || shouldSkipOverlayFrame(at: presentationTime) {
+            stateLock.unlock()
+            return
+        }
+
+        overlayFramePending = true
+        stateLock.unlock()
+
+        Task { @MainActor in
+            let image = overlayFrameProvider()
+            self.finishOverlayFrame(image: image, fallback: box, presentationTime: presentationTime)
+        }
+    }
+
+    private func shouldProbeInactiveOverlay(at presentationTime: CMTime) -> Bool {
+        guard let lastOverlayProbeTime else { return true }
+        return CMTimeCompare(CMTimeSubtract(presentationTime, lastOverlayProbeTime), Self.inactiveOverlayProbeInterval) >= 0
+    }
+
+    private func shouldSkipOverlayFrame(at presentationTime: CMTime) -> Bool {
+        guard let lastOverlayFrameTime else { return false }
+        return CMTimeCompare(CMTimeSubtract(presentationTime, lastOverlayFrameTime), Self.overlayFrameInterval) < 0
+    }
+
+    private func finishOverlayFrame(image: CGImage?, fallback: SampleBufferBox, presentationTime: CMTime) {
+        if let image {
+            engine.appendVideoImage(RecordingImageFrame(image: image, presentationTime: presentationTime))
+        } else {
+            engine.appendVideo(fallback)
+        }
+
+        stateLock.lock()
+        overlayActive = image != nil
+        overlayFramePending = false
+        if image != nil {
+            lastOverlayFrameTime = presentationTime
+        }
+        stateLock.unlock()
+    }
+
+    func waitForPendingOverlayFrame() async {
+        guard overlayFrameProvider != nil else { return }
+        for _ in 0..<60 {
+            if !hasPendingOverlayFrame() { return }
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
+    @MainActor
+    func appendFinalOverlayFrameIfNeeded(presentationTime: CMTime) {
+        guard let overlayFrameProvider, let image = overlayFrameProvider() else { return }
+        engine.appendVideoImageIfNeeded(RecordingImageFrame(image: image, presentationTime: presentationTime))
+    }
+
+    private func hasPendingOverlayFrame() -> Bool {
+        stateLock.lock()
+        let pending = overlayFramePending
+        stateLock.unlock()
+        return pending
     }
 }
 
@@ -182,6 +539,7 @@ final class RecordingController {
     private let settingsStore: SettingsStore
 
     private(set) var isRecording = false
+    private var isFinalizingRecording = false
     private var onStateChange: ((Bool) -> Void)?
     /// Called right before the Save dialog is shown so any obscuring overlay
     /// (e.g. a zoom overlay at `.screenSaver` level) can be dismissed first.
@@ -193,9 +551,13 @@ final class RecordingController {
     private var captureSession: AVCaptureSession?
     private var engine: RecordingEngine?
     private var borderWindow: NSWindow?
+    private var recordingDisplay: DisplayDescriptor?
+    private var recordingSourceRect: CGRect?
     private let webcam: WebcamOverlayController
+    private var excludesWebcamFromScreenCapture = false
     private let sampleQueue = DispatchQueue(label: "com.zoomitmac.recorder.samples")
     private var clipEditor: VideoClipEditorController?
+    var overlayFrameProvider: (@MainActor @Sendable (CGRect?) -> CGImage?)?
     init(
         captureService: ScreenCaptureService,
         displayManager: DisplayManager,
@@ -214,10 +576,21 @@ final class RecordingController {
     func toggle(region: Bool, onStateChange: @escaping (Bool) -> Void) {
         if isRecording {
             stop()
+        } else if isFinalizingRecording || clipEditor != nil {
+            NSSound.beep()
         } else {
             self.onStateChange = onStateChange
             start(region: region)
         }
+    }
+
+    func setWebcamExcludedFromScreenCapture(_ excluded: Bool) {
+        excludesWebcamFromScreenCapture = excluded
+        webcam.setExcludedFromScreenCapture(excluded)
+    }
+
+    var webcamWindowNumberForScreenCaptureExclusion: Int? {
+        webcam.windowNumber
     }
 
     private func start(region: Bool) {
@@ -241,15 +614,20 @@ final class RecordingController {
     }
 
     private func beginCapture(display: DisplayDescriptor, sourceRect: CGRect?) {
+        recordingDisplay = display
+        recordingSourceRect = sourceRect
         // Show the orange recording border first so it's part of our own windows
         // (excluded from capture) before the stream filter is built.
         showBorder(display: display, region: sourceRect)
         // Show the webcam picture-in-picture overlay (if enabled), positioned
-        // inside the recorded area so it appears within the recording. It's a
-        // normal capturable window so it's captured into the video.
+        // inside the recorded area so it appears within the recording. When a
+        // ZoomIt overlay is active, the webcam stays visually fixed and is
+        // composited into overlay frames instead of being captured as screen
+        // content.
         Task { @MainActor in
             do {
                 await self.webcam.start(settings: self.settingsStore.load(), area: self.recordedArea(display: display, region: sourceRect))
+                self.webcam.setExcludedFromScreenCapture(self.excludesWebcamFromScreenCapture)
                 try await self.startStreaming(display: display, sourceRect: sourceRect)
                 self.isRecording = true
                 self.onStateChange?(true)
@@ -334,7 +712,8 @@ final class RecordingController {
         configuration.height = pixelHeight
         configuration.showsCursor = true
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        let overlayFrameProvider = self.overlayFrameProvider
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: overlayFrameProvider == nil ? 60 : 30)
         configuration.queueDepth = 5
 
         let wantsSystemAudio = settings.recordSystemAudio
@@ -367,11 +746,21 @@ final class RecordingController {
             systemAudio: wantsSystemAudio,
             microphone: wantsMic
         )
-        engine.startWriting()
+        await engine.startWriting()
         self.engine = engine
 
         let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
-        let output = RecordingStreamOutput(engine: engine)
+        let output = RecordingStreamOutput(engine: engine, overlayFrameProvider: overlayFrameProvider.map { provider in
+            { @MainActor @Sendable in
+                guard let overlayImage = provider(sourceRect) else {
+                    self.webcam.setExcludedFromScreenCapture(self.excludesWebcamFromScreenCapture)
+                    return nil
+                }
+                self.webcam.setExcludedFromScreenCapture(true)
+                guard let webcamFrame = self.webcam.recordingSnapshot() else { return overlayImage }
+                return self.composite(webcamFrame, over: overlayImage, display: display, sourceRect: sourceRect)
+            }
+        })
         try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sampleQueue)
         if wantsSystemAudio {
             try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: sampleQueue)
@@ -390,6 +779,56 @@ final class RecordingController {
         try await stream.startCapture()
     }
 
+    private func composite(_ webcamFrame: WebcamRecordingFrame, over overlayImage: CGImage, display: DisplayDescriptor, sourceRect: CGRect?) -> CGImage {
+        let width = overlayImage.width
+        let height = overlayImage.height
+        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: bitmapInfo
+        ) else { return overlayImage }
+
+        context.interpolationQuality = .high
+        context.draw(overlayImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        let scale = CGFloat(width) / (sourceRect?.width ?? display.frame.width)
+        let source = sourceRect ?? CGRect(origin: .zero, size: display.frame.size)
+        let frame = webcamFrame.frame
+        let x = (frame.minX - display.frame.minX - source.minX) * scale
+        let topY = (display.frame.maxY - frame.maxY - source.minY) * scale
+        let webcamWidth = frame.width * scale
+        let webcamHeight = frame.height * scale
+        let drawRect = CGRect(x: x, y: CGFloat(height) - topY - webcamHeight, width: webcamWidth, height: webcamHeight).integral
+        guard drawRect.intersects(CGRect(x: 0, y: 0, width: width, height: height)) else { return overlayImage }
+
+        context.saveGState()
+        let clipped = drawRect.intersection(CGRect(x: 0, y: 0, width: width, height: height))
+        let path = CGPath(roundedRect: clipped, cornerWidth: webcamFrame.cornerRadius * scale, cornerHeight: webcamFrame.cornerRadius * scale, transform: nil)
+        context.addPath(path)
+        context.clip()
+
+        let imageSize = CGSize(width: webcamFrame.image.width, height: webcamFrame.image.height)
+        let imageAspect = imageSize.width / imageSize.height
+        let rectAspect = drawRect.width / drawRect.height
+        var imageRect = drawRect
+        if imageAspect > rectAspect {
+            imageRect.size.width = drawRect.height * imageAspect
+            imageRect.origin.x = drawRect.midX - imageRect.width / 2
+        } else {
+            imageRect.size.height = drawRect.width / imageAspect
+            imageRect.origin.y = drawRect.midY - imageRect.height / 2
+        }
+        context.draw(webcamFrame.image, in: imageRect)
+        context.restoreGState()
+
+        return context.makeImage() ?? overlayImage
+    }
+
     private func setupMicrophone(device: AVCaptureDevice, engine: RecordingEngine) throws {
         let session = AVCaptureSession()
         let input = try AVCaptureDeviceInput(device: device)
@@ -406,8 +845,9 @@ final class RecordingController {
     private func stop() {
         guard isRecording else { return }
         isRecording = false
+        isFinalizingRecording = true
         hideBorder()
-        webcam.stop()
+        setWebcamExcludedFromScreenCapture(false)
 
         captureSession?.stopRunning()
         captureSession = nil
@@ -415,38 +855,76 @@ final class RecordingController {
 
         let engine = self.engine
         let stream = self.stream
+        let streamOutput = self.streamOutput
+        let recordingDisplay = self.recordingDisplay
+        let recordingSourceRect = self.recordingSourceRect
         self.stream = nil
         self.streamOutput = nil
+        self.recordingDisplay = nil
+        self.recordingSourceRect = nil
 
         Task { @MainActor in
             try? await stream?.stopCapture()
+            await streamOutput?.waitForPendingOverlayFrame()
+            streamOutput?.appendFinalOverlayFrameIfNeeded(presentationTime: CMClockGetTime(CMClockGetHostTimeClock()))
+            if let recordingDisplay,
+               let image = try? await self.captureFallbackFrame(display: recordingDisplay, sourceRect: recordingSourceRect) {
+                engine?.appendVideoImageAtEnd(RecordingImageFrame(image: image, presentationTime: CMClockGetTime(CMClockGetHostTimeClock())))
+            }
+            engine?.appendBlackVideoFrameIfNeeded(presentationTime: CMClockGetTime(CMClockGetHostTimeClock()))
+            self.webcam.stop()
+            await engine?.waitForQueuedAppends()
             engine?.finish { url in
                 Task { @MainActor in
                     self.engine = nil
                     self.onStateChange?(false)
                     if let url {
                         self.presentSave(tempURL: url)
+                    } else {
+                        self.isFinalizingRecording = false
+                        self.presentError(ScreenCaptureError.recordingFailed)
                     }
                 }
             }
         }
     }
 
+    private func captureFallbackFrame(display: DisplayDescriptor, sourceRect: CGRect?) async throws -> CGImage {
+        let frame = try await captureService.captureDisplay(display)
+        guard let sourceRect else { return frame.image }
+        let scale = display.scaleFactor
+        let pixelRect = CGRect(
+            x: sourceRect.minX * scale,
+            y: sourceRect.minY * scale,
+            width: sourceRect.width * scale,
+            height: sourceRect.height * scale
+        ).integral
+        return frame.image.cropping(to: pixelRect) ?? frame.image
+    }
+
     private func presentSave(tempURL: URL) {
         // Dismiss any zoom overlay first so the editor isn't hidden behind it.
         onWillShowSaveDialog?()
+        DispatchQueue.main.async { [weak self] in
+            self?.presentClipEditor(tempURL: tempURL)
+        }
+    }
+
+    private func presentClipEditor(tempURL: URL) {
         // Show the clip editor (preview, trim, append) before saving, mirroring
         // ZoomIt on Windows. The editor exports an edited MP4, which we then
         // move to the chosen destination.
         NSApp.activate(ignoringOtherApps: true)
         let editor = VideoClipEditorController()
         self.clipEditor = editor
-        editor.present(tempURL: tempURL, suggestedName: suggestedFilename(), onSave: { [weak self] editedURL in
+        let editorLevel = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 2)
+        editor.present(tempURL: tempURL, suggestedName: suggestedFilename(), windowLevel: editorLevel, onSave: { [weak self] editedURL in
             self?.clipEditor = nil
             try? FileManager.default.removeItem(at: tempURL)
             self?.savePanel(for: editedURL)
         }, onCancel: { [weak self] in
             self?.clipEditor = nil
+            self?.isFinalizingRecording = false
             try? FileManager.default.removeItem(at: tempURL)
         })
     }
@@ -469,6 +947,7 @@ final class RecordingController {
         } else {
             try? FileManager.default.removeItem(at: tempURL)
         }
+        isFinalizingRecording = false
     }
 
     private func suggestedFilename() -> String {
@@ -547,7 +1026,11 @@ final class RecordingController {
         stream = nil
         streamOutput = nil
         engine = nil
+        recordingDisplay = nil
+        recordingSourceRect = nil
+        isFinalizingRecording = false
         hideBorder()
+        setWebcamExcludedFromScreenCapture(false)
         webcam.stop()
         isRecording = false
     }

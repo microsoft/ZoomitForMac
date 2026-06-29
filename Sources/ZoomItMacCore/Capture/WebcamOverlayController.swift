@@ -1,9 +1,18 @@
 import AVFoundation
 import AppKit
+import CoreImage
 
-private final class WebcamReadinessProbe: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+struct WebcamRecordingFrame: @unchecked Sendable {
+    let image: CGImage
+    let frame: CGRect
+    let cornerRadius: CGFloat
+}
+
+private final class WebcamFrameOutput: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     private let lock = NSLock()
+    private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
     private var continuation: CheckedContinuation<Void, Never>?
+    private var latestImage: CGImage?
     private var isReady = false
 
     func waitForFirstFrame(timeoutNanoseconds: UInt64) async -> Bool {
@@ -54,8 +63,20 @@ private final class WebcamReadinessProbe: NSObject, AVCaptureVideoDataOutputSamp
         continuation?.resume()
     }
 
+    func latestFrame() -> CGImage? {
+        lock.lock()
+        let image = latestImage
+        lock.unlock()
+        return image
+    }
+
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard sampleBuffer.isValid else { return }
+        guard sampleBuffer.isValid, let pixelBuffer = sampleBuffer.imageBuffer else { return }
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let image = ciContext.createCGImage(ciImage, from: ciImage.extent)
+        lock.lock()
+        latestImage = image
+        lock.unlock()
         resolve()
     }
 }
@@ -96,7 +117,9 @@ final class WebcamOverlayController {
     private let permissionService: PermissionService
     private var window: NSWindow?
     private var session: AVCaptureSession?
-    private var readinessProbe: WebcamReadinessProbe?
+    private var frameOutput: WebcamFrameOutput?
+    private var recordingFrame: CGRect?
+    private var recordingCornerRadius: CGFloat = 0
     private let readinessQueue = DispatchQueue(label: "com.zoomitmac.webcam.readiness")
 
     init(permissionService: PermissionService) {
@@ -120,10 +143,10 @@ final class WebcamOverlayController {
         guard let input = try? AVCaptureDeviceInput(device: camera), session.canAddInput(input) else { return }
         session.addInput(input)
 
-        let readinessProbe = WebcamReadinessProbe()
+        let frameOutput = WebcamFrameOutput()
         let readinessOutput = AVCaptureVideoDataOutput()
         readinessOutput.alwaysDiscardsLateVideoFrames = true
-        readinessOutput.setSampleBufferDelegate(readinessProbe, queue: readinessQueue)
+        readinessOutput.setSampleBufferDelegate(frameOutput, queue: readinessQueue)
         let canWaitForFirstFrame = session.canAddOutput(readinessOutput)
         if canWaitForFirstFrame {
             session.addOutput(readinessOutput)
@@ -135,13 +158,15 @@ final class WebcamOverlayController {
         let frame = overlayFrame(area: area, position: position, size: size, shape: shape)
 
         let window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        // Above the zoom overlay so it stays visible (and recorded) while zoomed,
-        // click-through, and capturable (default sharingType) so it's recorded.
+        // Keep the webcam fixed above ZoomIt's viewport. The recorder excludes
+        // this window while overlay snapshots are active and composites the
+        // latest camera frame at this same fixed rect, avoiding a zoomed copy.
         window.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
         window.backgroundColor = .clear
         window.isOpaque = false
         window.ignoresMouseEvents = true
         window.hasShadow = false
+        window.sharingType = .readOnly
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         window.isReleasedWhenClosed = false
 
@@ -157,10 +182,12 @@ final class WebcamOverlayController {
 
         self.window = window
         self.session = session
-        self.readinessProbe = readinessProbe
+        self.frameOutput = frameOutput
+        self.recordingFrame = frame
+        self.recordingCornerRadius = cornerRadius(for: shape, size: size, bounds: contentView.bounds)
 
         if canWaitForFirstFrame {
-            let receivedFrame = await readinessProbe.waitForFirstFrame(timeoutNanoseconds: 2_000_000_000)
+            let receivedFrame = await frameOutput.waitForFirstFrame(timeoutNanoseconds: 2_000_000_000)
             if receivedFrame {
                 await settlePreview(window: window, contentView: contentView)
             }
@@ -170,24 +197,37 @@ final class WebcamOverlayController {
     func stop() {
         session?.stopRunning()
         session = nil
-        readinessProbe = nil
+        frameOutput = nil
+        recordingFrame = nil
+        recordingCornerRadius = 0
         window?.orderOut(nil)
         window = nil
     }
 
+    func setExcludedFromScreenCapture(_ excluded: Bool) {
+        window?.sharingType = excluded ? .none : .readOnly
+    }
+
+    var windowNumber: Int? {
+        window?.windowNumber
+    }
+
+    func recordingSnapshot() -> WebcamRecordingFrame? {
+        guard let image = frameOutput?.latestFrame(), let recordingFrame else { return nil }
+        return WebcamRecordingFrame(image: image, frame: recordingFrame, cornerRadius: recordingCornerRadius)
+    }
+
     private func applyShape(_ shape: Shape, to layer: CALayer, size: Size, bounds: CGRect) {
         layer.masksToBounds = true
+        layer.cornerRadius = cornerRadius(for: shape, size: size, bounds: bounds)
+    }
+
+    private func cornerRadius(for shape: Shape, size: Size, bounds: CGRect) -> CGFloat {
+        guard size != .fullScreen else { return 0 }
         switch shape {
-        case .rectangle:
-            layer.cornerRadius = 0
-        case .roundedRectangle, .roundedSquare:
-            layer.cornerRadius = min(bounds.width, bounds.height) * 0.12
-        case .circle:
-            layer.cornerRadius = min(bounds.width, bounds.height) / 2
-        }
-        // Full screen ignores shape.
-        if size == .fullScreen {
-            layer.cornerRadius = 0
+        case .rectangle: return 0
+        case .roundedRectangle, .roundedSquare: return min(bounds.width, bounds.height) * 0.12
+        case .circle: return min(bounds.width, bounds.height) / 2
         }
     }
 

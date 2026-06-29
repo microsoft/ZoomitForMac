@@ -33,14 +33,17 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
     private var onSave: ((URL) -> Void)?
     private var onCancel: (() -> Void)?
     private var suggestedName = "ZoomIt.mp4"
+    private var preferredWindowLevel: NSWindow.Level = .floating
 
     /// Shows the editor for `tempURL`. Calls `onSave` with an exported MP4 of the
     /// edited result, or `onCancel` if dismissed.
     func present(tempURL: URL, suggestedName: String,
+                 windowLevel: NSWindow.Level = .floating,
                  onSave: @escaping (URL) -> Void, onCancel: @escaping () -> Void) {
         self.onSave = onSave
         self.onCancel = onCancel
         self.suggestedName = suggestedName
+        self.preferredWindowLevel = windowLevel
         let asset = AVURLAsset(url: tempURL)
         clips = [asset]
         transitions = []
@@ -64,7 +67,7 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         // Keep the editor above other apps and on every Space so it can't get
         // lost behind windows when the user switches away (this app has no Dock
         // tile to return through).
-        win.level = .floating
+        win.level = preferredWindowLevel
         win.hidesOnDeactivate = false
         win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
@@ -165,6 +168,7 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
             NSApp.setActivationPolicy(.regular)
             ZoomItAppIcon.apply()
             NSApp.activate(ignoringOtherApps: true)
+            win.level = self.preferredWindowLevel
             win.makeKeyAndOrderFront(nil)
         }
         syncTimeline()
