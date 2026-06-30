@@ -705,6 +705,8 @@ final class RecordingController {
     private let settingsStore: SettingsStore
 
     private(set) var isRecording = false
+    private var isStartingRecording = false
+    private var isStoppingRecording = false
     private var isFinalizingRecording = false
     private var onStateChange: ((Bool) -> Void)?
     /// Called right before the Save dialog is shown so any obscuring overlay
@@ -740,10 +742,10 @@ final class RecordingController {
     /// Toggles recording. When starting, `region` chooses whole-screen vs. a
     /// dragged region. `onStateChange(true/false)` reports start/stop.
     func toggle(region: Bool, onStateChange: @escaping (Bool) -> Void) {
-        if isRecording {
-            stop()
-        } else if isFinalizingRecording || clipEditor != nil {
+        if isStoppingRecording || isFinalizingRecording || isStartingRecording || clipEditor != nil {
             NSSound.beep()
+        } else if isRecording {
+            stop()
         } else {
             self.onStateChange = onStateChange
             start(region: region)
@@ -763,9 +765,15 @@ final class RecordingController {
             return
         }
 
+        isStartingRecording = true
+
         if region {
             selectRegion(on: display) { [weak self] rect in
-                guard let self, let rect else { return }
+                guard let self else { return }
+                guard let rect else {
+                    self.isStartingRecording = false
+                    return
+                }
                 self.beginCapture(display: display, sourceRect: rect)
             }
         } else {
@@ -792,9 +800,11 @@ final class RecordingController {
             do {
                 await self.webcam.start(settings: self.settingsStore.load(), area: self.recordedArea(display: display, region: sourceRect))
                 try await self.startStreaming(display: display, sourceRect: sourceRect)
+                self.isStartingRecording = false
                 self.isRecording = true
                 self.onStateChange?(true)
             } catch {
+                self.isStartingRecording = false
                 self.cleanup()
                 self.presentError(error)
                 self.onStateChange?(false)
@@ -988,8 +998,8 @@ final class RecordingController {
     }
 
     private func stop() {
-        guard isRecording else { return }
-        isRecording = false
+        guard isRecording, !isStoppingRecording else { return }
+        isStoppingRecording = true
         isFinalizingRecording = true
         hideBorder()
 
@@ -1021,6 +1031,8 @@ final class RecordingController {
             engine?.finish { url in
                 Task { @MainActor in
                     self.engine = nil
+                    self.isRecording = false
+                    self.isStoppingRecording = false
                     self.onStateChange?(false)
                     if let url {
                         self.presentSave(tempURL: url)
@@ -1174,6 +1186,8 @@ final class RecordingController {
         recordingDisplay = nil
         recordingSourceRect = nil
         isFinalizingRecording = false
+        isStartingRecording = false
+        isStoppingRecording = false
         hideBorder()
         webcam.stop()
         isRecording = false
