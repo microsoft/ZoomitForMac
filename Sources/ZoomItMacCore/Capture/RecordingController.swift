@@ -928,7 +928,7 @@ final class RecordingController {
         self.stream = stream
 
         if wantsMic, let device = AudioDevices.microphone(forID: settings.microphoneDeviceID) {
-            try? setupMicrophone(device: device, engine: engine)
+            try? setupMicrophone(device: device, engine: engine, windNoiseRemoval: settings.recordNoiseCancellation)
         }
 
         try await stream.startCapture()
@@ -984,9 +984,12 @@ final class RecordingController {
         return context.makeImage() ?? overlayImage
     }
 
-    private func setupMicrophone(device: AVCaptureDevice, engine: RecordingEngine) throws {
+    private func setupMicrophone(device: AVCaptureDevice, engine: RecordingEngine, windNoiseRemoval: Bool) throws {
         let session = AVCaptureSession()
         let input = try AVCaptureDeviceInput(device: device)
+        if windNoiseRemoval {
+            _ = AudioDevices.setWindNoiseRemoval(true, on: input)
+        }
         if session.canAddInput(input) { session.addInput(input) }
         let output = AVCaptureAudioDataOutput()
         let micOut = RecordingMicOutput(engine: engine)

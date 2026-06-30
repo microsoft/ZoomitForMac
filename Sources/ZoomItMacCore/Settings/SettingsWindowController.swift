@@ -48,6 +48,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     // Record tab controls.
     private weak var microphonePopup: NSPopUpButton?
+    private weak var noiseCancellationCheckbox: NSButton?
 
     // Webcam controls.
     private weak var webcamDevicePopup: NSPopUpButton?
@@ -996,6 +997,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let micCheck = NSButton(checkboxWithTitle: "Capture microphone", target: self, action: #selector(recordMicrophoneChanged(_:)))
         micCheck.state = settings.recordMicrophone ? .on : .off
 
+        let windNoiseCheck = NSButton(checkboxWithTitle: "Wind noise removal", target: self, action: #selector(recordNoiseCancellationChanged(_:)))
+        windNoiseCheck.state = settings.recordNoiseCancellation ? .on : .off
+        noiseCancellationCheckbox = windNoiseCheck
+
         let micPopup = NSPopUpButton(frame: .zero, pullsDown: false)
         micPopup.translatesAutoresizingMaskIntoConstraints = false
         let microphones = AudioDevices.availableMicrophones()
@@ -1014,7 +1019,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         micPopup.widthAnchor.constraint(equalToConstant: 220).isActive = true
         microphonePopup = micPopup
         let micDeviceRow = makeRow([makeLabel("Device:"), micPopup])
-        let micOptions = makeIndentedColumn([micDeviceRow])
+        let micOptions = makeIndentedColumn([windNoiseCheck, micDeviceRow])
+        updateMicrophoneOptionControls()
 
         let trimButton = NSButton(title: "Trim…", target: self, action: #selector(openTrimEditor(_:)))
         trimButton.bezelStyle = .rounded
@@ -1054,7 +1060,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func recordMicrophoneChanged(_ sender: NSButton) {
         settings.recordMicrophone = (sender.state == .on)
-        microphonePopup?.isEnabled = settings.recordMicrophone
+        updateMicrophoneOptionControls()
         persist()
         // Trigger the microphone permission prompt the first time it's enabled.
         if settings.recordMicrophone {
@@ -1064,7 +1070,24 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func microphoneChanged(_ sender: NSPopUpButton) {
         settings.microphoneDeviceID = (sender.selectedItem?.representedObject as? String) ?? ""
+        updateMicrophoneOptionControls()
         persist()
+    }
+
+    @objc private func recordNoiseCancellationChanged(_ sender: NSButton) {
+        settings.recordNoiseCancellation = (sender.state == .on)
+        persist()
+    }
+
+    private func updateMicrophoneOptionControls() {
+        microphonePopup?.isEnabled = settings.recordMicrophone
+        let supported = settings.recordMicrophone && AudioDevices.supportsWindNoiseRemoval(deviceID: settings.microphoneDeviceID)
+        noiseCancellationCheckbox?.title = supported ? "Wind noise removal" : "Wind noise removal (not supported by selected microphone)"
+        noiseCancellationCheckbox?.isEnabled = supported
+        noiseCancellationCheckbox?.state = (settings.recordNoiseCancellation && supported) ? .on : .off
+        noiseCancellationCheckbox?.toolTip = supported
+            ? "Uses AVFoundation wind noise removal for the selected microphone."
+            : "Wind noise removal requires macOS 15 and a microphone that supports it."
     }
 
     @objc private func openTrimEditor(_ sender: NSButton) {

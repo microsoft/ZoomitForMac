@@ -33,6 +33,20 @@ enum AudioDevices {
         return AVCaptureDevice.default(for: .audio)
     }
 
+    static func supportsWindNoiseRemoval(deviceID: String) -> Bool {
+        guard #available(macOS 15.0, *),
+              let device = microphone(forID: deviceID),
+              let input = try? AVCaptureDeviceInput(device: device) else { return false }
+        return input.isWindNoiseRemovalSupported
+    }
+
+    @discardableResult
+    static func setWindNoiseRemoval(_ enabled: Bool, on input: AVCaptureDeviceInput) -> Bool {
+        guard #available(macOS 15.0, *), input.isWindNoiseRemovalSupported else { return false }
+        input.isWindNoiseRemovalEnabled = enabled
+        return input.isWindNoiseRemovalEnabled == enabled
+    }
+
     private static var deviceTypes: [AVCaptureDevice.DeviceType] {
         if #available(macOS 14.0, *) {
             return [.microphone, .external]
