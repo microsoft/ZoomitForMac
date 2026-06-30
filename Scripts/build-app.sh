@@ -15,7 +15,7 @@ rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
 
 cp "$BIN_DIR/ZoomIt" "$APP_PATH/Contents/MacOS/ZoomIt"
-cp -R "$BIN_DIR/ZoomItMac_ZoomItMacCore.bundle" "$APP_PATH/ZoomItMac_ZoomItMacCore.bundle"
+cp -R "$BIN_DIR/ZoomItMac_ZoomItMacCore.bundle" "$APP_PATH/Contents/Resources/ZoomItMac_ZoomItMacCore.bundle"
 
 if [[ -f "$ICON_SOURCE" ]] && command -v sips >/dev/null && command -v iconutil >/dev/null; then
     ICONSET="$(mktemp -d)/ZoomIt.iconset"
@@ -69,5 +69,13 @@ cat > "$APP_PATH/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+
+# Ad-hoc sign the completed bundle so macOS privacy services see the real
+# CFBundleIdentifier and sealed bundle layout. The explicit designated
+# requirement keeps local TCC grants stable across rebuilds without using a
+# signing certificate.
+codesign --force --deep --sign - \
+    --requirements '=designated => identifier "com.sysinternals.zoomitmac"' \
+    "$APP_PATH" >/dev/null
 
 echo "$APP_PATH"

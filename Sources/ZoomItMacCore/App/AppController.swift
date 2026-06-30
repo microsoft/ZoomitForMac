@@ -94,19 +94,20 @@ final class AppController: NSObject {
         alert.addButton(withTitle: screenGranted ? "Screen Recording Settings…" : "Grant Screen Recording…")
         alert.addButton(withTitle: micStatus == .notDetermined ? "Grant Microphone…" : "Microphone Settings…")
         alert.addButton(withTitle: camStatus == .notDetermined ? "Grant Camera…" : "Camera Settings…")
+        alert.window.animationBehavior = .none
         NSApp.activate(ignoringOtherApps: true)
 
         switch alert.runModal() {
         case .alertSecondButtonReturn:
             if screenGranted {
                 permissionService.openSystemSettings()
+                representWhenActive()
             } else {
-                permissionService.requestScreenCaptureAccess()
-                permissionService.openSystemSettings()
+                let granted = permissionService.requestScreenCaptureAccess()
+                if granted {
+                    presentPermissionsDialog()
+                }
             }
-            // Opened System Settings: re-present only when the user returns, so
-            // we don't steal focus back and bury the Settings window.
-            representWhenActive()
         case .alertThirdButtonReturn:
             if micStatus == .notDetermined {
                 // Wait for the system prompt to resolve, then re-present so the

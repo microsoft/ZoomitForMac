@@ -18,7 +18,7 @@ struct PermissionState: Equatable {
 
 protocol PermissionService {
     func currentState() -> PermissionState
-    func requestScreenCaptureAccess()
+    func requestScreenCaptureAccess() -> Bool
     func openSystemSettings()
     func microphoneStatus() -> MicrophonePermission
     func requestMicrophoneAccess(completion: (@MainActor @Sendable () -> Void)?)
@@ -35,8 +35,8 @@ final class SystemPermissionService: PermissionService {
         )
     }
 
-    func requestScreenCaptureAccess() {
-        _ = CGRequestScreenCaptureAccess()
+    func requestScreenCaptureAccess() -> Bool {
+        CGRequestScreenCaptureAccess()
     }
 
     func openSystemSettings() {
@@ -93,38 +93,17 @@ final class SystemPermissionService: PermissionService {
     }
 }
 
-/// Shared UI for the required Screen Recording permission. Used both at startup
-/// and whenever a capture action is invoked without the permission, so the app
-/// explains what is needed instead of silently doing nothing.
+/// Shared gate for the required Screen Recording permission. Capture hotkeys use
+/// only the macOS permission prompt here; ZoomIt's explanatory UI lives in the
+/// explicit Check Permissions command.
 @MainActor
 enum ScreenRecordingPrompt {
-    /// Returns true if Screen Recording is granted. Otherwise it registers the
-    /// app with the system, shows an explanatory alert offering to open the
-    /// relevant Settings pane, and returns false.
+    /// Returns true if Screen Recording is granted. Otherwise it asks macOS to
+    /// request/register the permission and returns false.
     @discardableResult
     static func ensureGranted(_ service: PermissionService) -> Bool {
         if service.currentState().screenCapture.isGranted { return true }
-
-        // Trigger the system prompt so ZoomIt is added to the Screen Recording
-        // list even if the user dismisses the dialog below.
-        service.requestScreenCaptureAccess()
-
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Screen Recording Permission Needed"
-        alert.informativeText = """
-        ZoomIt needs Screen Recording permission to zoom, snip, record, and capture panoramas.
-
-        Enable ZoomIt under System Settings ▸ Privacy & Security ▸ Screen Recording, then relaunch ZoomIt.
-
-        Microphone and Camera are optional and are requested only when you use voice or webcam recording.
-        """
-        alert.addButton(withTitle: "Open Settings…")
-        alert.addButton(withTitle: "Later")
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn {
-            service.openSystemSettings()
-        }
+        _ = service.requestScreenCaptureAccess()
         return false
     }
 }

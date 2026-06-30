@@ -12,9 +12,9 @@
 #   zsh Scripts/reset-first-run.sh --keep-settings   # keep saved settings
 #   zsh Scripts/reset-first-run.sh --no-launch       # don't relaunch afterwards
 #
-# Note: test first run with the .app bundle (build it with Scripts/build-app.sh).
-# Do NOT rebuild between resetting and granting: a rebuild changes the binary's
-# code hash, which by itself invalidates the macOS Screen Recording grant.
+# Note: test first run with the .app bundle (build it with Scripts/build-app.sh),
+# not `swift run`. The build script ad-hoc signs the bundle with a stable local
+# designated requirement so privacy grants attach to the bundle identifier.
 
 set -euo pipefail
 
@@ -46,6 +46,11 @@ sleep 1
 echo "Resetting privacy permissions (Screen Recording, Microphone, Camera) for $BUNDLE_ID…"
 # `reset All` clears every TCC service this app may have been granted.
 tccutil reset All "$BUNDLE_ID" || true
+# Older development bundles were only executable-signed and appeared to TCC as
+# "ZoomIt" instead of the bundle identifier. Clear that stale identity too so
+# the Screen Recording list doesn't show an enabled row that no longer matches
+# the current app's code requirement.
+tccutil reset All "ZoomIt" >/dev/null 2>&1 || true
 
 if [[ "$keep_settings" == false ]]; then
     echo "Clearing saved settings (UserDefaults) for $BUNDLE_ID…"

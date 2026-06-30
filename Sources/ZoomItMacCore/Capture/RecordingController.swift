@@ -39,6 +39,8 @@ private final class RecordingEngine: @unchecked Sendable {
     private var sourceStartTime: CMTime?
     private var sessionStarted = false
     private var hasVideoSample = false
+    private var systemAudioStarted = false
+    private var micStarted = false
     private var lastVideoPresentationTime: CMTime?
     private var lastVideoDuration = recordingSyntheticFrameDuration
     private var finished = false
@@ -61,7 +63,7 @@ private final class RecordingEngine: @unchecked Sendable {
         let audioSettings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVNumberOfChannelsKey: 2,
-            AVSampleRateKey: 44_100,
+            AVSampleRateKey: 48_000,
             AVEncoderBitRateKey: 128_000
         ]
         if systemAudio {
@@ -150,9 +152,17 @@ private final class RecordingEngine: @unchecked Sendable {
     func appendSystemAudio(_ box: SampleBufferBox) {
         queue.async {
             guard self.sessionStarted, !self.finished, self.writer.status == .writing,
-                  let input = self.systemAudioInput, input.isReadyForMoreMediaData,
-                  self.hasNonZeroAudioSamples(box.buffer),
-                  let sampleBuffer = self.retimedSampleBuffer(box.buffer) else { return }
+                  let input = self.systemAudioInput, input.isReadyForMoreMediaData else { return }
+            // Avoid creating an entirely-silent track by dropping leading silent
+            // buffers until the first real audio; once audio has started, append
+            // every buffer (including later silence) so the timeline stays
+            // continuous. Dropping silent buffers mid-stream punches gaps that
+            // the AAC encoder turns into pops.
+            if !self.systemAudioStarted {
+                guard self.hasNonZeroAudioSamples(box.buffer) else { return }
+                self.systemAudioStarted = true
+            }
+            guard let sampleBuffer = self.retimedAudioSampleBuffer(box.buffer) else { return }
             input.append(sampleBuffer)
         }
     }
@@ -160,9 +170,13 @@ private final class RecordingEngine: @unchecked Sendable {
     func appendMicrophone(_ box: SampleBufferBox) {
         queue.async {
             guard self.sessionStarted, !self.finished, self.writer.status == .writing,
-                  let input = self.micInput, input.isReadyForMoreMediaData,
-                  self.hasNonZeroAudioSamples(box.buffer),
-                  let sampleBuffer = self.retimedSampleBuffer(box.buffer) else { return }
+                  let input = self.micInput, input.isReadyForMoreMediaData else { return }
+            if !self.micStarted {
+                guard self.hasNonZeroAudioSamples(box.buffer) else { return }
+                self.micStarted = true
+            }
+            let writerSource = self.limitedMicrophoneSampleBuffer(box.buffer) ?? box.buffer
+            guard let sampleBuffer = self.retimedAudioSampleBuffer(writerSource) else { return }
             input.append(sampleBuffer)
         }
     }
@@ -231,10 +245,6 @@ private final class RecordingEngine: @unchecked Sendable {
         retimedSampleBuffer(sampleBuffer, presentationTime: monotonicVideoPresentationTime(for: CMSampleBufferGetPresentationTimeStamp(sampleBuffer)))
     }
 
-    private func retimedSampleBuffer(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
-        retimedSampleBuffer(sampleBuffer, presentationTime: normalizedPresentationTime(for: CMSampleBufferGetPresentationTimeStamp(sampleBuffer)))
-    }
-
     private func retimedSampleBuffer(_ sampleBuffer: CMSampleBuffer, presentationTime: CMTime) -> CMSampleBuffer? {
         var timing = CMSampleTimingInfo(
             duration: effectiveDuration(for: sampleBuffer),
@@ -250,6 +260,125 @@ private final class RecordingEngine: @unchecked Sendable {
             sampleBufferOut: &retimed
         ) == noErr else { return nil }
         return retimed
+    }
+
+    /// Retimes an audio buffer by shifting only its presentation timestamps onto
+    /// the writer timeline while preserving the capture API's timing layout.
+    private func retimedAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
+        let originalPresentation = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let newPresentation = normalizedPresentationTime(for: originalPresentation)
+        let offset = CMTimeSubtract(newPresentation, originalPresentation)
+        guard offset.isValid, offset.isNumeric else { return nil }
+
+        var count: CMItemCount = 0
+        guard CMSampleBufferGetSampleTimingInfoArray(sampleBuffer, entryCount: 0, arrayToFill: nil, entriesNeededOut: &count) == noErr, count > 0 else {
+            return nil
+        }
+        var timings = [CMSampleTimingInfo](repeating: CMSampleTimingInfo(), count: count)
+        guard CMSampleBufferGetSampleTimingInfoArray(sampleBuffer, entryCount: count, arrayToFill: &timings, entriesNeededOut: &count) == noErr else {
+            return nil
+        }
+        for index in timings.indices {
+            if timings[index].presentationTimeStamp.isValid {
+                timings[index].presentationTimeStamp = CMTimeAdd(timings[index].presentationTimeStamp, offset)
+            }
+            timings[index].decodeTimeStamp = .invalid
+        }
+
+        var retimed: CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: sampleBuffer,
+            sampleTimingEntryCount: timings.count,
+            sampleTimingArray: &timings,
+            sampleBufferOut: &retimed
+        ) == noErr else { return nil }
+        return retimed
+    }
+
+    private func limitedMicrophoneSampleBuffer(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)?.pointee,
+              streamDescription.mFormatID == kAudioFormatLinearPCM,
+              streamDescription.mBitsPerChannel == 32,
+              streamDescription.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+              let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return sampleBuffer }
+
+        let byteCount = CMBlockBufferGetDataLength(blockBuffer)
+        guard byteCount > 0 else { return sampleBuffer }
+
+        var data = Data(count: byteCount)
+        let copyStatus = data.withUnsafeMutableBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return kCMBlockBufferBadPointerParameterErr }
+            return CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: byteCount, destination: baseAddress)
+        }
+        guard copyStatus == noErr else { return sampleBuffer }
+
+        let knee: Float = 0.98
+        var limited = false
+        data.withUnsafeMutableBytes { rawBuffer in
+            let samples = rawBuffer.bindMemory(to: Float.self)
+            for index in samples.indices {
+                let sample = samples[index]
+                if !sample.isFinite {
+                    samples[index] = 0
+                    limited = true
+                    continue
+                }
+
+                let magnitude = abs(sample)
+                if magnitude > knee {
+                    let excess = magnitude - knee
+                    let softened = knee + (1 - knee) * (excess / (excess + 1))
+                    samples[index] = sample < 0 ? -softened : softened
+                    limited = true
+                }
+            }
+        }
+        guard limited else { return sampleBuffer }
+
+        var limitedBlockBuffer: CMBlockBuffer?
+        guard CMBlockBufferCreateWithMemoryBlock(
+            allocator: kCFAllocatorDefault,
+            memoryBlock: nil,
+            blockLength: data.count,
+            blockAllocator: kCFAllocatorDefault,
+            customBlockSource: nil,
+            offsetToData: 0,
+            dataLength: data.count,
+            flags: 0,
+            blockBufferOut: &limitedBlockBuffer
+        ) == noErr, let limitedBlockBuffer else { return sampleBuffer }
+
+        let replaceStatus = data.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return kCMBlockBufferBadPointerParameterErr }
+            return CMBlockBufferReplaceDataBytes(with: baseAddress, blockBuffer: limitedBlockBuffer, offsetIntoDestination: 0, dataLength: data.count)
+        }
+        guard replaceStatus == noErr else { return sampleBuffer }
+
+        var timingCount: CMItemCount = 0
+        guard CMSampleBufferGetSampleTimingInfoArray(sampleBuffer, entryCount: 0, arrayToFill: nil, entriesNeededOut: &timingCount) == noErr, timingCount > 0 else {
+            return sampleBuffer
+        }
+        var timings = [CMSampleTimingInfo](repeating: CMSampleTimingInfo(), count: timingCount)
+        guard CMSampleBufferGetSampleTimingInfoArray(sampleBuffer, entryCount: timingCount, arrayToFill: &timings, entriesNeededOut: &timingCount) == noErr else {
+            return sampleBuffer
+        }
+
+        var limitedSampleBuffer: CMSampleBuffer?
+        guard CMSampleBufferCreateReady(
+            allocator: kCFAllocatorDefault,
+            dataBuffer: limitedBlockBuffer,
+            formatDescription: formatDescription,
+            sampleCount: CMSampleBufferGetNumSamples(sampleBuffer),
+            sampleTimingEntryCount: timings.count,
+            sampleTimingArray: &timings,
+            sampleSizeEntryCount: 0,
+            sampleSizeArray: nil,
+            sampleBufferOut: &limitedSampleBuffer
+        ) == noErr else { return sampleBuffer }
+
+        return limitedSampleBuffer
     }
 
     private func hasNonZeroAudioSamples(_ sampleBuffer: CMSampleBuffer) -> Bool {
@@ -533,7 +662,10 @@ private final class RecordingStreamOutput: NSObject, SCStreamOutput, @unchecked 
 /// Forwards microphone buffers to the engine.
 private final class RecordingMicOutput: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
     private let engine: RecordingEngine
-    init(engine: RecordingEngine) { self.engine = engine }
+
+    init(engine: RecordingEngine) {
+        self.engine = engine
+    }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         engine.appendMicrophone(SampleBufferBox(buffer: sampleBuffer))
@@ -591,6 +723,7 @@ final class RecordingController {
     private let sampleQueue = DispatchQueue(label: "com.zoomitmac.recorder.samples")
     private var clipEditor: VideoClipEditorController?
     var overlayFrameProvider: (@MainActor @Sendable (CGRect?) -> CGImage?)?
+
     init(
         captureService: ScreenCaptureService,
         displayManager: DisplayManager,
@@ -742,6 +875,8 @@ final class RecordingController {
         configuration.height = pixelHeight
         configuration.showsCursor = true
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        configuration.sampleRate = 48_000
+        configuration.channelCount = 2
         let overlayFrameProvider = self.overlayFrameProvider
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: overlayFrameProvider == nil ? 60 : 30)
         configuration.queueDepth = 5
@@ -754,18 +889,6 @@ final class RecordingController {
         // without a bundled usage description would crash the bare executable.
         let wantsMic = settings.recordMicrophone
             && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-
-        // Prefer capturing the microphone through ScreenCaptureKit (macOS 15+)
-        // so it shares the video clock; fall back to AVCaptureSession on older
-        // systems.
-        var micViaSCStream = false
-        if wantsMic, #available(macOS 15.0, *) {
-            configuration.captureMicrophone = true
-            if !settings.microphoneDeviceID.isEmpty {
-                configuration.microphoneCaptureDeviceID = settings.microphoneDeviceID
-            }
-            micViaSCStream = true
-        }
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("ZoomIt-\(UUID().uuidString).mp4")
@@ -791,15 +914,11 @@ final class RecordingController {
         if wantsSystemAudio {
             try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: sampleQueue)
         }
-        if micViaSCStream, #available(macOS 15.0, *) {
-            try stream.addStreamOutput(output, type: .microphone, sampleHandlerQueue: sampleQueue)
-        }
         self.streamOutput = output
         self.stream = stream
 
-        // macOS 14 fallback: capture the microphone via AVCaptureSession.
-        if wantsMic, !micViaSCStream, let device = AudioDevices.microphone(forID: settings.microphoneDeviceID) {
-            try? setupMicrophone(device: device, noiseCancellation: settings.recordNoiseCancellation, engine: engine)
+        if wantsMic, let device = AudioDevices.microphone(forID: settings.microphoneDeviceID) {
+            try? setupMicrophone(device: device, engine: engine)
         }
 
         try await stream.startCapture()
@@ -855,17 +974,9 @@ final class RecordingController {
         return context.makeImage() ?? overlayImage
     }
 
-    private func setupMicrophone(device: AVCaptureDevice, noiseCancellation: Bool, engine: RecordingEngine) throws {
+    private func setupMicrophone(device: AVCaptureDevice, engine: RecordingEngine) throws {
         let session = AVCaptureSession()
         let input = try AVCaptureDeviceInput(device: device)
-        if noiseCancellation, #available(macOS 15.0, *) {
-            if input.isMultichannelAudioModeSupported(.stereo) {
-                input.multichannelAudioMode = .stereo
-            }
-            if input.isWindNoiseRemovalSupported {
-                input.isWindNoiseRemovalEnabled = true
-            }
-        }
         if session.canAddInput(input) { session.addInput(input) }
         let output = AVCaptureAudioDataOutput()
         let micOut = RecordingMicOutput(engine: engine)
@@ -952,7 +1063,9 @@ final class RecordingController {
         self.clipEditor = editor
         editor.present(tempURL: tempURL, suggestedName: suggestedFilename(), onSave: { [weak self] editedURL in
             self?.clipEditor = nil
-            try? FileManager.default.removeItem(at: tempURL)
+            if editedURL != tempURL {
+                try? FileManager.default.removeItem(at: tempURL)
+            }
             self?.savePanel(for: editedURL)
         }, onCancel: { [weak self] in
             self?.clipEditor = nil

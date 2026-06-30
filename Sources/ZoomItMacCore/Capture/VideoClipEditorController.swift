@@ -34,6 +34,7 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
     private var onCancel: (() -> Void)?
     private var suggestedName = "ZoomIt.mp4"
     private var preferredWindowLevel: NSWindow.Level = .normal
+    private var originalURL: URL?
 
     /// Shows the editor for `tempURL`. Calls `onSave` with an exported MP4 of the
     /// edited result, or `onCancel` if dismissed.
@@ -44,6 +45,7 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         self.onCancel = onCancel
         self.suggestedName = suggestedName
         self.preferredWindowLevel = windowLevel
+        self.originalURL = tempURL
         let asset = AVURLAsset(url: tempURL)
         clips = [asset]
         transitions = []
@@ -325,10 +327,21 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
 
     @objc private func save() {
         pause()
+        if canSaveOriginalWithoutExport(), let originalURL {
+            closeWindow()
+            onSave?(originalURL)
+            return
+        }
         export { [weak self] url in
             self?.closeWindow()
             if let url { self?.onSave?(url) } else { self?.onCancel?() }
         }
+    }
+
+    private func canSaveOriginalWithoutExport() -> Bool {
+        guard clips.count == 1, transitions.isEmpty else { return false }
+        let tolerance = 1.0 / 600.0
+        return trimStart <= tolerance && abs(trimEnd - duration) <= tolerance
     }
 
     func windowWillClose(_ notification: Notification) {

@@ -139,7 +139,7 @@ struct AppSettings: Equatable {
         breakBackgroundFile: "",
         recordSystemAudio: false,
         recordMicrophone: false,
-        recordNoiseCancellation: true,
+        recordNoiseCancellation: false,
         microphoneDeviceID: "",
         webcamEnabled: false,
         webcamDeviceID: "",

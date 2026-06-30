@@ -48,7 +48,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     // Record tab controls.
     private weak var microphonePopup: NSPopUpButton?
-    private weak var noiseCancellationCheckbox: NSButton?
 
     // Webcam controls.
     private weak var webcamDevicePopup: NSPopUpButton?
@@ -997,11 +996,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let micCheck = NSButton(checkboxWithTitle: "Capture microphone", target: self, action: #selector(recordMicrophoneChanged(_:)))
         micCheck.state = settings.recordMicrophone ? .on : .off
 
-        let noiseCancellationCheck = NSButton(checkboxWithTitle: "Noise cancellation", target: self, action: #selector(recordNoiseCancellationChanged(_:)))
-        noiseCancellationCheck.state = settings.recordNoiseCancellation ? .on : .off
-        noiseCancellationCheck.isEnabled = settings.recordMicrophone
-        noiseCancellationCheckbox = noiseCancellationCheck
-
         let micPopup = NSPopUpButton(frame: .zero, pullsDown: false)
         micPopup.translatesAutoresizingMaskIntoConstraints = false
         let microphones = AudioDevices.availableMicrophones()
@@ -1020,7 +1014,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         micPopup.widthAnchor.constraint(equalToConstant: 220).isActive = true
         microphonePopup = micPopup
         let micDeviceRow = makeRow([makeLabel("Device:"), micPopup])
-        let micOptions = makeIndentedColumn([noiseCancellationCheck, micDeviceRow])
+        let micOptions = makeIndentedColumn([micDeviceRow])
 
         let trimButton = NSButton(title: "Trim…", target: self, action: #selector(openTrimEditor(_:)))
         trimButton.bezelStyle = .rounded
@@ -1061,7 +1055,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     @objc private func recordMicrophoneChanged(_ sender: NSButton) {
         settings.recordMicrophone = (sender.state == .on)
         microphonePopup?.isEnabled = settings.recordMicrophone
-        noiseCancellationCheckbox?.isEnabled = settings.recordMicrophone
         persist()
         // Trigger the microphone permission prompt the first time it's enabled.
         if settings.recordMicrophone {
@@ -1071,11 +1064,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     @objc private func microphoneChanged(_ sender: NSPopUpButton) {
         settings.microphoneDeviceID = (sender.selectedItem?.representedObject as? String) ?? ""
-        persist()
-    }
-
-    @objc private func recordNoiseCancellationChanged(_ sender: NSButton) {
-        settings.recordNoiseCancellation = (sender.state == .on)
         persist()
     }
 
