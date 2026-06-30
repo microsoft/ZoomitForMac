@@ -166,9 +166,7 @@ final class ModeCoordinator {
             return
         }
 
-        let permissions = permissionService.currentState()
-        guard permissions.screenCapture.isGranted else {
-            permissionService.requestScreenCaptureAccess()
+        guard ScreenRecordingPrompt.ensureGranted(permissionService) else {
             return
         }
 
@@ -215,9 +213,7 @@ final class ModeCoordinator {
             return
         }
 
-        let permissions = permissionService.currentState()
-        guard permissions.screenCapture.isGranted else {
-            permissionService.requestScreenCaptureAccess()
+        guard ScreenRecordingPrompt.ensureGranted(permissionService) else {
             return
         }
 
@@ -292,9 +288,7 @@ final class ModeCoordinator {
             return
         }
 
-        let permissions = permissionService.currentState()
-        guard permissions.screenCapture.isGranted else {
-            permissionService.requestScreenCaptureAccess()
+        guard ScreenRecordingPrompt.ensureGranted(permissionService) else {
             return
         }
 

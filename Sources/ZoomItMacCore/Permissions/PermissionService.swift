@@ -21,10 +21,10 @@ protocol PermissionService {
     func requestScreenCaptureAccess()
     func openSystemSettings()
     func microphoneStatus() -> MicrophonePermission
-    func requestMicrophoneAccess()
+    func requestMicrophoneAccess(completion: (@MainActor @Sendable () -> Void)?)
     func openMicrophoneSettings()
     func cameraStatus() -> MicrophonePermission
-    func requestCameraAccess()
+    func requestCameraAccess(completion: (@MainActor @Sendable () -> Void)?)
     func openCameraSettings()
 }
 
@@ -55,9 +55,12 @@ final class SystemPermissionService: PermissionService {
         }
     }
 
-    func requestMicrophoneAccess() {
+    func requestMicrophoneAccess(completion: (@MainActor @Sendable () -> Void)? = nil) {
         // Safe because the executable embeds an NSMicrophoneUsageDescription.
-        AVCaptureDevice.requestAccess(for: .audio) { _ in }
+        AVCaptureDevice.requestAccess(for: .audio) { _ in
+            guard let completion else { return }
+            Task { @MainActor in completion() }
+        }
     }
 
     func openMicrophoneSettings() {
@@ -76,13 +79,52 @@ final class SystemPermissionService: PermissionService {
         }
     }
 
-    func requestCameraAccess() {
+    func requestCameraAccess(completion: (@MainActor @Sendable () -> Void)? = nil) {
         // Safe because the executable embeds an NSCameraUsageDescription.
-        AVCaptureDevice.requestAccess(for: .video) { _ in }
+        AVCaptureDevice.requestAccess(for: .video) { _ in
+            guard let completion else { return }
+            Task { @MainActor in completion() }
+        }
     }
 
     func openCameraSettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") else { return }
         NSWorkspace.shared.open(url)
+    }
+}
+
+/// Shared UI for the required Screen Recording permission. Used both at startup
+/// and whenever a capture action is invoked without the permission, so the app
+/// explains what is needed instead of silently doing nothing.
+@MainActor
+enum ScreenRecordingPrompt {
+    /// Returns true if Screen Recording is granted. Otherwise it registers the
+    /// app with the system, shows an explanatory alert offering to open the
+    /// relevant Settings pane, and returns false.
+    @discardableResult
+    static func ensureGranted(_ service: PermissionService) -> Bool {
+        if service.currentState().screenCapture.isGranted { return true }
+
+        // Trigger the system prompt so ZoomIt is added to the Screen Recording
+        // list even if the user dismisses the dialog below.
+        service.requestScreenCaptureAccess()
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Screen Recording Permission Needed"
+        alert.informativeText = """
+        ZoomIt needs Screen Recording permission to zoom, snip, record, and capture panoramas.
+
+        Enable ZoomIt under System Settings ▸ Privacy & Security ▸ Screen Recording, then relaunch ZoomIt.
+
+        Microphone and Camera are optional and are requested only when you use voice or webcam recording.
+        """
+        alert.addButton(withTitle: "Open Settings…")
+        alert.addButton(withTitle: "Later")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            service.openSystemSettings()
+        }
+        return false
     }
 }

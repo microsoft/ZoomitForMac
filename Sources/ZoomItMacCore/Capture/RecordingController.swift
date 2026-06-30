@@ -622,8 +622,7 @@ final class RecordingController {
     }
 
     private func start(region: Bool) {
-        guard permissionService.currentState().screenCapture.isGranted else {
-            permissionService.requestScreenCaptureAccess()
+        guard ScreenRecordingPrompt.ensureGranted(permissionService) else {
             return
         }
         guard let display = displayManager.activeDisplay() else {

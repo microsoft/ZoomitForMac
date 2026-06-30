@@ -130,8 +130,21 @@ final class WebcamOverlayController {
     /// or the full display) if it's enabled and the camera is authorized. Safe
     /// to call when disabled (it does nothing).
     func start(settings: AppSettings, area: CGRect) async {
-        guard settings.webcamEnabled,
-              permissionService.cameraStatus() == .granted,
+        guard settings.webcamEnabled else { return }
+
+        // Request camera access in-flow if it hasn't been decided yet, so
+        // enabling the webcam works the first time a recording starts without a
+        // separate trip to settings. If the user denies (or previously denied),
+        // the overlay is skipped silently.
+        if permissionService.cameraStatus() == .notDetermined {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                permissionService.requestCameraAccess {
+                    continuation.resume()
+                }
+            }
+        }
+
+        guard permissionService.cameraStatus() == .granted,
               let camera = VideoDevices.camera(forID: settings.webcamDeviceID) else { return }
 
         let position = Position(rawValue: settings.webcamPosition) ?? .bottomRight

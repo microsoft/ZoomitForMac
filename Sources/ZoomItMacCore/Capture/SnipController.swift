@@ -219,8 +219,7 @@ final class SnipController {
             return
         }
 
-        guard permissionService.currentState().screenCapture.isGranted else {
-            permissionService.requestScreenCaptureAccess()
+        guard ScreenRecordingPrompt.ensureGranted(permissionService) else {
             finish()
             return
         }

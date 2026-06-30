@@ -160,12 +160,15 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         // Become a regular app while editing so the window appears in the Dock
         // and Cmd-Tab, letting the user switch away and return; restored to
         // accessory on close. Switching from .accessory needs a runloop hop to
-        // make the Dock tile appear reliably.
+        // make the Dock tile appear reliably. Bring the editor to the front once
+        // when it first appears (it stays a normal-level window afterwards, so
+        // it can be sent behind other apps).
         win.makeKeyAndOrderFront(nil)
         DispatchQueue.main.async {
             ZoomItAppIcon.apply()
             NSApp.setActivationPolicy(.regular)
             ZoomItAppIcon.apply()
+            NSApp.activate(ignoringOtherApps: true)
             win.makeKeyAndOrderFront(nil)
         }
         syncTimeline()

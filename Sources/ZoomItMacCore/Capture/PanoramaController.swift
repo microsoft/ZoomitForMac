@@ -104,8 +104,7 @@ final class PanoramaController {
     }
 
     private func start(save: Bool) {
-        guard permissionService.currentState().screenCapture.isGranted else {
-            permissionService.requestScreenCaptureAccess()
+        guard ScreenRecordingPrompt.ensureGranted(permissionService) else {
             isActive = false
             return
         }
