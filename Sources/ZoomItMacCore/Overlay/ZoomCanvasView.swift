@@ -225,11 +225,6 @@ final class ZoomCanvasView: NSView {
             return
         }
 
-        if isDrawingMode, event.modifierFlags.contains(.control) {
-            leaveDrawingModeFromRightClick()
-            return
-        }
-
         guard isDrawingMode else {
             // In live zoom, clicking must not enter drawing mode; the user
             // explicitly enters it with the draw hotkey (Control+1/Control+2).
