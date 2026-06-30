@@ -10,7 +10,6 @@ final class ZoomCanvasView: NSView {
     private var pointerViewPoint: CGPoint = .zero
     private var isDrawingMode = false
     private var isStroking = false
-    private var isDrawOnly = false
     /// The tool of the in-progress stroke, used to hide the pen cursor while a
     /// shape (line/arrow/rectangle/ellipse) is being dragged out.
     private var activeStrokeTool: AnnotationTool?
@@ -19,6 +18,7 @@ final class ZoomCanvasView: NSView {
     /// While interactive live zoom is on, the overlay is click-through and a
     /// global monitor tracks the real cursor so the magnified view follows it.
     private var liveMouseMonitor: Any?
+    private var drawingRightClickMonitor: Any?
     private var liveZoomClickThrough = false
     /// Region-snip state: while active, a drag selects a rectangle of the
     /// current viewport to copy or save.
@@ -70,7 +70,6 @@ final class ZoomCanvasView: NSView {
                 // click begins a stroke immediately. Returning from typing also
                 // restores the drawn cursor, but without warping through the old
                 // zoom anchor.
-                isDrawOnly = true
                 enterDrawingMode()
             default:
                 break
@@ -226,6 +225,11 @@ final class ZoomCanvasView: NSView {
             return
         }
 
+        if isDrawingMode, event.modifierFlags.contains(.control) {
+            leaveDrawingModeFromRightClick()
+            return
+        }
+
         guard isDrawingMode else {
             // In live zoom, clicking must not enter drawing mode; the user
             // explicitly enters it with the draw hotkey (Control+1/Control+2).
@@ -289,16 +293,27 @@ final class ZoomCanvasView: NSView {
         }
 
         if isDrawingMode {
-            // Right click leaves drawing mode and returns to pannable zoom. In
-            // draw-without-zoom there is no zoom to return to, so exit instead.
-            if isDrawOnly {
-                commandSink(.exit)
-            } else {
-                exitDrawingMode()
-                needsDisplay = true
-            }
+            // Right click leaves drawing mode and returns to the current
+            // overlay mode; it does not exit ZoomIt.
+            leaveDrawingModeFromRightClick()
+            return
         }
         // Right click no longer exits the overlay; use Esc or zoom out to 1x.
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        pointerViewPoint = convert(event.locationInWindow, from: nil)
+        leaveDrawingModeFromRightClick()
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        pointerViewPoint = convert(event.locationInWindow, from: nil)
+        leaveDrawingModeFromRightClick()
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        pointerViewPoint = convert(event.locationInWindow, from: nil)
+        leaveDrawingModeFromRightClick()
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -523,6 +538,7 @@ final class ZoomCanvasView: NSView {
         guard !isDrawingMode else { return }
         isDrawingMode = true
         isStroking = false
+        startDrawingRightClickMonitor()
         updateLiveZoomInteractivity()
     }
 
@@ -532,6 +548,7 @@ final class ZoomCanvasView: NSView {
         isStroking = false
         activeStrokeTool = nil
         blankScreen = nil
+        stopDrawingRightClickMonitor()
         // Keep the zoom anchored where it was while drawing. The physical mouse
         // moved around the screen while drawing, so warp the (hidden) system
         // cursor back to the frozen anchor. This keeps panning continuous and
@@ -540,6 +557,37 @@ final class ZoomCanvasView: NSView {
             warpCursor(toGlobal: anchor)
         }
         updateLiveZoomInteractivity()
+    }
+
+    private func leaveDrawingModeFromRightClick() {
+        guard isDrawingMode else { return }
+        if isStroking {
+            annotationController.end(at: contentPoint(forViewPoint: pointerViewPoint))
+        }
+        exitDrawingMode()
+        needsDisplay = true
+    }
+
+    private func startDrawingRightClickMonitor() {
+        guard drawingRightClickMonitor == nil else { return }
+        drawingRightClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp]) { [weak self] event in
+            let windowNumber = event.window?.windowNumber
+            let location = event.locationInWindow
+            let handled = MainActor.assumeIsolated { () -> Bool in
+                guard let self, self.isDrawingMode, windowNumber == self.window?.windowNumber else { return false }
+                self.pointerViewPoint = self.convert(location, from: nil)
+                self.leaveDrawingModeFromRightClick()
+                return true
+            }
+            return handled ? nil : event
+        }
+    }
+
+    private func stopDrawingRightClickMonitor() {
+        if let drawingRightClickMonitor {
+            NSEvent.removeMonitor(drawingRightClickMonitor)
+        }
+        drawingRightClickMonitor = nil
     }
 
     /// When typing mode ends, keep the system cursor at the last mouse position
@@ -622,6 +670,7 @@ final class ZoomCanvasView: NSView {
 
     func prepareForClose() {
         stopLiveMouseTracking()
+        stopDrawingRightClickMonitor()
         showSystemCursor()
     }
 
@@ -635,6 +684,7 @@ final class ZoomCanvasView: NSView {
             updateLiveZoomInteractivity()
         } else {
             stopLiveMouseTracking()
+            stopDrawingRightClickMonitor()
             showSystemCursor()
         }
     }

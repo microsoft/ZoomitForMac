@@ -95,13 +95,13 @@ final class WebcamOverlayController {
     enum Size: Int {
         case small, medium, large, xLarge, fullScreen
 
-        /// Height of the overlay in points, or nil for full screen.
-        var height: CGFloat? {
+        /// Width of the overlay as a percentage of the recorded area.
+        var widthFraction: CGFloat? {
             switch self {
-            case .small: return 180
-            case .medium: return 260
-            case .large: return 360
-            case .xLarge: return 480
+            case .small: return 0.15
+            case .medium: return 0.25
+            case .large: return 0.33
+            case .xLarge: return 0.50
             case .fullScreen: return nil
             }
         }
@@ -168,7 +168,13 @@ final class WebcamOverlayController {
         let previewLayer = AVCaptureVideoPreviewLayer(session: session)
         previewLayer.videoGravity = .resizeAspectFill
 
-        let frame = overlayFrame(area: area, position: position, size: size, shape: shape)
+        let frame = overlayFrame(
+            area: area,
+            position: position,
+            size: size,
+            shape: shape,
+            cameraAspectRatio: Self.aspectRatio(for: camera)
+        )
 
         let window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
         // Keep the webcam fixed above ZoomIt's viewport. The recorder excludes
@@ -249,13 +255,19 @@ final class WebcamOverlayController {
         try? await Task.sleep(nanoseconds: 250_000_000)
     }
 
-    private func overlayFrame(area: CGRect, position: Position, size: Size, shape: Shape) -> CGRect {
-        guard let presetHeight = size.height else {
+    private static func aspectRatio(for camera: AVCaptureDevice) -> CGFloat {
+        let dimensions = CMVideoFormatDescriptionGetDimensions(camera.activeFormat.formatDescription)
+        guard dimensions.width > 0, dimensions.height > 0 else { return 16.0 / 9.0 }
+        return CGFloat(dimensions.width) / CGFloat(dimensions.height)
+    }
+
+    private func overlayFrame(area: CGRect, position: Position, size: Size, shape: Shape, cameraAspectRatio: CGFloat) -> CGRect {
+        guard let widthFraction = size.widthFraction else {
             return area // full screen fills the recorded area
         }
-        let margin: CGFloat = 24
-        var height = presetHeight
-        var width = shape.isSquare ? height : height * (16.0 / 9.0)
+        let margin: CGFloat = 8
+        var width = area.width * widthFraction
+        var height = shape.isSquare ? width : width / max(cameraAspectRatio, 0.01)
         // Clamp to fit within the recorded area (minus margins) for small regions.
         let maxWidth = max(1, area.width - 2 * margin)
         let maxHeight = max(1, area.height - 2 * margin)
