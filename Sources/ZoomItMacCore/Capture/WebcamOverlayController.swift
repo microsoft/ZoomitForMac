@@ -88,7 +88,7 @@ private final class WebcamFrameOutput: NSObject, AVCaptureVideoDataOutputSampleB
 final class WebcamOverlayController {
     /// Corner placement options (matching the settings order).
     enum Position: Int {
-        case topLeft, topRight, bottomLeft, bottomRight
+        case topLeft, topRight, bottomLeft, bottomRight, center
     }
 
     /// Size presets (matching the settings order).
@@ -292,6 +292,9 @@ final class WebcamOverlayController {
         case .bottomRight:
             x = area.maxX - margin - width
             y = area.minY + margin
+        case .center:
+            x = area.midX - width / 2
+            y = area.midY - height / 2
         }
         return CGRect(x: x, y: y, width: width, height: height)
     }

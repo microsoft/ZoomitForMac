@@ -1116,11 +1116,23 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         devicePopup.action = #selector(webcamDeviceChanged(_:))
         webcamDevicePopup = devicePopup
 
-        let positionPopup = makeIndexedPopup(
-            titles: ["Top-left", "Top-right", "Bottom-left", "Bottom-right"],
-            selected: settings.webcamPosition,
-            action: #selector(webcamPositionChanged(_:))
-        )
+        let positionPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        positionPopup.translatesAutoresizingMaskIntoConstraints = false
+        for item in [
+            ("Top-left", 0),
+            ("Top-right", 1),
+            ("Center", 4),
+            ("Bottom-left", 2),
+            ("Bottom-right", 3)
+        ] {
+            positionPopup.addItem(withTitle: item.0)
+            positionPopup.lastItem?.representedObject = item.1
+            if item.1 == settings.webcamPosition {
+                positionPopup.select(positionPopup.lastItem)
+            }
+        }
+        positionPopup.target = self
+        positionPopup.action = #selector(webcamPositionChanged(_:))
         webcamPositionPopup = positionPopup
 
         let sizePopup = makeIndexedPopup(
@@ -1193,7 +1205,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     @objc private func webcamPositionChanged(_ sender: NSPopUpButton) {
-        settings.webcamPosition = sender.indexOfSelectedItem
+        settings.webcamPosition = (sender.selectedItem?.representedObject as? Int) ?? 3
         persist()
     }
 

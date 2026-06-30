@@ -345,14 +345,30 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
     }
 
     func windowWillClose(_ notification: Notification) {
-        if let observer = timeObserver { player?.removeTimeObserver(observer); timeObserver = nil }
-        pause()
+        tearDownPlayback()
         window = nil
         NSApp.setActivationPolicy(.accessory)
         onCancel?(); onCancel = nil; onSave = nil
     }
 
-    private func closeWindow() { window?.orderOut(nil); window = nil; NSApp.setActivationPolicy(.accessory) }
+    private func closeWindow() {
+        tearDownPlayback()
+        window?.orderOut(nil)
+        window = nil
+        NSApp.setActivationPolicy(.accessory)
+    }
+
+    private func tearDownPlayback() {
+        if let observer = timeObserver {
+            player?.removeTimeObserver(observer)
+            timeObserver = nil
+        }
+        player?.pause()
+        playerView?.player = nil
+        player = nil
+        isPlaying = false
+        playButton?.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: nil)
+    }
 
     // MARK: - Composition
 

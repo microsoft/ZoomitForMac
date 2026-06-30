@@ -77,7 +77,7 @@ struct AppSettings: Equatable {
     var webcamEnabled: Bool
     /// The unique ID of the camera device, or empty for the default camera.
     var webcamDeviceID: String
-    /// Corner placement: 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right.
+    /// Placement: 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right, 4 center.
     var webcamPosition: Int
     /// Size preset: 0 small, 1 medium, 2 large, 3 x-large, 4 full screen.
     var webcamSize: Int
