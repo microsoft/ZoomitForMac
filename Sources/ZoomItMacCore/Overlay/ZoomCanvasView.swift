@@ -19,6 +19,7 @@ final class ZoomCanvasView: NSView {
     /// global monitor tracks the real cursor so the magnified view follows it.
     private var liveMouseMonitor: Any?
     private var drawingRightClickMonitor: Any?
+    private var drawingGlobalRightClickMonitor: Any?
     private var liveZoomClickThrough = false
     /// Region-snip state: while active, a drag selects a rectangle of the
     /// current viewport to copy or save.
@@ -569,13 +570,26 @@ final class ZoomCanvasView: NSView {
             let windowNumber = event.window?.windowNumber
             let location = event.locationInWindow
             let handled = MainActor.assumeIsolated { () -> Bool in
-                guard let self, self.isDrawingMode, windowNumber == self.window?.windowNumber else { return false }
-                self.pointerViewPoint = self.convert(location, from: nil)
-                self.leaveDrawingModeFromRightClick()
-                return true
+                self?.handleDrawingRightClick(windowNumber: windowNumber, locationInWindow: location) ?? false
             }
             return handled ? nil : event
         }
+        drawingGlobalRightClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp]) { [weak self] _ in
+            MainActor.assumeIsolated {
+                _ = self?.handleDrawingRightClick(windowNumber: nil, locationInWindow: nil)
+            }
+        }
+    }
+
+    private func handleDrawingRightClick(windowNumber: Int?, locationInWindow: CGPoint?) -> Bool {
+        guard isDrawingMode else { return false }
+        if let locationInWindow, windowNumber == window?.windowNumber {
+            pointerViewPoint = convert(locationInWindow, from: nil)
+        } else {
+            syncPointerViewPointFromMouse()
+        }
+        leaveDrawingModeFromRightClick()
+        return true
     }
 
     private func stopDrawingRightClickMonitor() {
@@ -583,6 +597,10 @@ final class ZoomCanvasView: NSView {
             NSEvent.removeMonitor(drawingRightClickMonitor)
         }
         drawingRightClickMonitor = nil
+        if let drawingGlobalRightClickMonitor {
+            NSEvent.removeMonitor(drawingGlobalRightClickMonitor)
+        }
+        drawingGlobalRightClickMonitor = nil
     }
 
     /// When typing mode ends, keep the system cursor at the last mouse position
