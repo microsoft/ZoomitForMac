@@ -31,7 +31,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var settings: AppSettings
 
     private static let homepageURLString = "http://www.sysinternals.com"
-    private static let contentWidth: CGFloat = 504
+    private static let contentWidth: CGFloat = 620
     private static let panelHorizontalInset: CGFloat = 28
     private static let wrappedLabelWidth: CGFloat = contentWidth - panelHorizontalInset * 2
 
@@ -49,6 +49,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     // Record tab controls.
     private weak var microphonePopup: NSPopUpButton?
     private weak var noiseCancellationCheckbox: NSButton?
+
+    // DemoType tab controls.
+    private weak var demoTypeFileField: NSTextField?
 
     // Webcam controls.
     private weak var webcamDevicePopup: NSPopUpButton?
@@ -73,6 +76,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         case snip
         case snipOcr
         case record
+        case demoType
         case panorama
     }
     private weak var hotKeyButton: NSButton?
@@ -82,6 +86,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private weak var snipHotKeyButton: NSButton?
     private weak var snipOcrHotKeyButton: NSButton?
     private weak var recordHotKeyButton: NSButton?
+    private weak var demoTypeHotKeyButton: NSButton?
     private weak var panoramaHotKeyButton: NSButton?
     private var hotKeyMonitor: Any?
     private var recordingTarget: HotKeyTarget?
@@ -122,6 +127,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         snipHotKeyButton?.title = snipHotKeyDisplayString()
         snipOcrHotKeyButton?.title = snipOcrHotKeyDisplayString()
         recordHotKeyButton?.title = recordHotKeyDisplayString()
+        demoTypeHotKeyButton?.title = demoTypeHotKeyDisplayString()
         panoramaHotKeyButton?.title = panoramaHotKeyDisplayString()
         launchAtLoginCheckbox?.state = settings.launchAtLogin ? .on : .off
         // Suspend the global hotkeys while the dialog is open so the user can
@@ -150,6 +156,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             ("Zoom", makeZoomTab()),
             ("Draw", makeDrawTab()),
             ("Type", makeTypeTab()),
+            ("DemoType", makeDemoTypeTab()),
             ("Break", makeBreakTab()),
             ("Snip", makeSnipTab()),
             ("Record", makeRecordTab()),
@@ -465,6 +472,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         beginRecording(target: .record, sender: sender)
     }
 
+    @objc private func toggleDemoTypeHotKeyRecording(_ sender: NSButton) {
+        beginRecording(target: .demoType, sender: sender)
+    }
+
     @objc private func togglePanoramaHotKeyRecording(_ sender: NSButton) {
         beginRecording(target: .panorama, sender: sender)
     }
@@ -504,7 +515,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             // Reject a shortcut already assigned to another ZoomIt hotkey.
             if conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
-                conflictsWithBreak(code: newCode, modifiers: newModifiers) {
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -513,7 +525,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         case .draw:
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
-                conflictsWithBreak(code: newCode, modifiers: newModifiers) {
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -522,7 +535,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         case .live:
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
-                conflictsWithBreak(code: newCode, modifiers: newModifiers) {
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -534,6 +548,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
                 conflictsWithSnip(code: newCode, modifiers: newModifiers) ||
                 conflictsWithRecord(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) ||
                 conflictsWithPanorama(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
@@ -544,7 +559,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
-                conflictsWithBreak(code: newCode, modifiers: newModifiers) {
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -555,7 +571,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
                 conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
-                conflictsWithSnip(code: newCode, modifiers: newModifiers) {
+                conflictsWithSnip(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -565,17 +582,33 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
-                conflictsWithBreak(code: newCode, modifiers: newModifiers) {
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
             settings.recordHotKeyCode = newCode
             settings.recordHotKeyModifiers = newModifiers
+        case .demoType:
+            if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
+                conflictsWithLive(code: newCode, modifiers: newModifiers) ||
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
+                conflictsWithSnip(code: newCode, modifiers: newModifiers) ||
+                conflictsWithSnipOcr(code: newCode, modifiers: newModifiers) ||
+                conflictsWithRecord(code: newCode, modifiers: newModifiers) ||
+                conflictsWithPanorama(code: newCode, modifiers: newModifiers) {
+                NSSound.beep()
+                return nil
+            }
+            settings.demoTypeHotKeyCode = newCode
+            settings.demoTypeHotKeyModifiers = newModifiers
         case .panorama:
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
-                conflictsWithBreak(code: newCode, modifiers: newModifiers) {
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -619,6 +652,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         code == settings.recordHotKeyCode && modifiers == settings.recordHotKeyModifiers
     }
 
+    private func conflictsWithDemoType(code: Int, modifiers: UInt) -> Bool {
+        settings.demoTypeHotKeyCode != 0 &&
+            code == settings.demoTypeHotKeyCode && modifiers == settings.demoTypeHotKeyModifiers
+    }
+
     private func conflictsWithPanorama(code: Int, modifiers: UInt) -> Bool {
         code == settings.panoramaHotKeyCode && modifiers == settings.panoramaHotKeyModifiers
     }
@@ -636,6 +674,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         snipHotKeyButton?.title = snipHotKeyDisplayString()
         snipOcrHotKeyButton?.title = snipOcrHotKeyDisplayString()
         recordHotKeyButton?.title = recordHotKeyDisplayString()
+        demoTypeHotKeyButton?.title = demoTypeHotKeyDisplayString()
         panoramaHotKeyButton?.title = panoramaHotKeyDisplayString()
     }
 
@@ -666,6 +705,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func recordHotKeyDisplayString() -> String {
         Self.describe(keyCode: settings.recordHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.recordHotKeyModifiers))
+    }
+
+    private func demoTypeHotKeyDisplayString() -> String {
+        guard settings.demoTypeHotKeyCode != 0 else { return "None" }
+        return Self.describe(keyCode: settings.demoTypeHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.demoTypeHotKeyModifiers))
     }
 
     private func panoramaHotKeyDisplayString() -> String {
@@ -1285,6 +1329,72 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         settings.typingFontName = newFont.fontName
         settings.typingFontSize = newFont.pointSize
         updateFontSample()
+        persist()
+    }
+
+    // MARK: - DemoType tab
+
+    private func makeDemoTypeTab() -> NSView {
+        let help = makeLabel(
+            "DemoType has ZoomIt type text specified in the input file when you enter the DemoType toggle. Simply separate snippets with the [end] keyword, or you can insert text from the clipboard if it is prefixed with the [start].",
+            wraps: true
+        )
+
+        let controlsHelp = makeLabel(
+            """
+            - Insert pauses with the [pause:n] keyword where 'n' is seconds.
+            - Send text via the clipboard with [paste] and [/paste].
+            - Send keystrokes with [enter], [up], [down], [left], and [right].
+
+            You can have ZoomIt send text automatically, or select the option to drive input with typing. When driving input, your key releases advance the script. Press Escape to stop.
+
+            When you reach the end of the file, ZoomIt reloads the file and starts at the beginning. Enter the hotkey with Shift toggled to step back to the last [end].
+            """,
+            wraps: true
+        )
+
+        let demoTypeHotKeyButton = NSButton(title: demoTypeHotKeyDisplayString(), target: self, action: #selector(toggleDemoTypeHotKeyRecording(_:)))
+        demoTypeHotKeyButton.bezelStyle = .rounded
+        demoTypeHotKeyButton.setButtonType(.momentaryPushIn)
+        demoTypeHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+        self.demoTypeHotKeyButton = demoTypeHotKeyButton
+        let hotKeyRow = makeRow([makeLabel("DemoType toggle:"), demoTypeHotKeyButton])
+
+        let fileField = makePathField(settings.demoTypeFile)
+        demoTypeFileField = fileField
+        let browseButton = NSButton(title: "...", target: self, action: #selector(chooseDemoTypeFile(_:)))
+        browseButton.bezelStyle = .rounded
+        let fileRow = makeRow([makeLabel("Input file:"), fileField, browseButton])
+
+        let speedSlider = NSSlider(value: Double(min(max(settings.demoTypeSpeed, 10), 100)), minValue: 10, maxValue: 100, target: self, action: #selector(demoTypeSpeedChanged(_:)))
+        speedSlider.translatesAutoresizingMaskIntoConstraints = false
+        speedSlider.widthAnchor.constraint(equalToConstant: 240).isActive = true
+        let speedRow = makeRow([makeLabel("DemoType typing speed:"), makeLabel("Slow"), speedSlider, makeLabel("Fast")])
+
+        let userDrivenCheck = NSButton(checkboxWithTitle: "Drive input with typing", target: self, action: #selector(demoTypeUserDrivenChanged(_:)))
+        userDrivenCheck.state = settings.demoTypeUserDriven ? .on : .off
+
+        return makeColumn([help, controlsHelp, hotKeyRow, fileRow, speedRow, userDrivenCheck], spacing: 8)
+    }
+
+    @objc private func chooseDemoTypeFile(_ sender: NSButton) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.title = "ZoomIt: Specify DemoType File"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        settings.demoTypeFile = url.path
+        demoTypeFileField?.stringValue = url.path
+        persist()
+    }
+
+    @objc private func demoTypeSpeedChanged(_ sender: NSSlider) {
+        settings.demoTypeSpeed = min(max(sender.integerValue, 10), 100)
+        persist()
+    }
+
+    @objc private func demoTypeUserDrivenChanged(_ sender: NSButton) {
+        settings.demoTypeUserDriven = sender.state == .on
         persist()
     }
 

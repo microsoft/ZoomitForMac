@@ -13,6 +13,8 @@ final class HotkeyService {
     private var snipOcrHotKeyRef: EventHotKeyRef?
     private var recordHotKeyRef: EventHotKeyRef?
     private var recordRegionHotKeyRef: EventHotKeyRef?
+    private var demoTypeHotKeyRef: EventHotKeyRef?
+    private var demoTypeResetHotKeyRef: EventHotKeyRef?
     private var panoramaCopyHotKeyRef: EventHotKeyRef?
     private var panoramaSaveHotKeyRef: EventHotKeyRef?
     private var breakHotKeyRef: EventHotKeyRef?
@@ -127,6 +129,8 @@ final class HotkeyService {
                 case 11: command = .startPanorama(save: true)
                 case 12: command = .toggleBreakTimer
                 case 13: command = .snipOcr
+                case 14: command = .startDemoType
+                case 15: command = .resetDemoType
                 default: return noErr
                 }
 
@@ -238,6 +242,28 @@ final class HotkeyService {
             &recordRegionHotKeyRef
         )
 
+        if settings.demoTypeHotKeyCode != 0 {
+            let demoTypeModifiers = NSEvent.ModifierFlags(rawValue: settings.demoTypeHotKeyModifiers)
+            RegisterEventHotKey(
+                UInt32(settings.demoTypeHotKeyCode),
+                carbonModifiers(from: demoTypeModifiers),
+                EventHotKeyID(signature: signature, id: 14),
+                target,
+                0,
+                &demoTypeHotKeyRef
+            )
+
+            let demoTypeResetModifiers = NSEvent.ModifierFlags(rawValue: settings.demoTypeHotKeyModifiers ^ NSEvent.ModifierFlags.shift.rawValue)
+            RegisterEventHotKey(
+                UInt32(settings.demoTypeHotKeyCode),
+                carbonModifiers(from: demoTypeResetModifiers),
+                EventHotKeyID(signature: signature, id: 15),
+                target,
+                0,
+                &demoTypeResetHotKeyRef
+            )
+        }
+
         // Panorama: the base shortcut copies the stitched panorama to the
         // clipboard; the same shortcut with Shift toggled saves it to a file.
         let panoramaModifiers = NSEvent.ModifierFlags(rawValue: settings.panoramaHotKeyModifiers)
@@ -304,6 +330,14 @@ final class HotkeyService {
             UnregisterEventHotKey(recordRegionHotKeyRef)
         }
         recordRegionHotKeyRef = nil
+        if let demoTypeHotKeyRef {
+            UnregisterEventHotKey(demoTypeHotKeyRef)
+        }
+        demoTypeHotKeyRef = nil
+        if let demoTypeResetHotKeyRef {
+            UnregisterEventHotKey(demoTypeResetHotKeyRef)
+        }
+        demoTypeResetHotKeyRef = nil
         if let panoramaCopyHotKeyRef {
             UnregisterEventHotKey(panoramaCopyHotKeyRef)
         }

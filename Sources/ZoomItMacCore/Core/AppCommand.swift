@@ -18,6 +18,8 @@ enum AppCommand: Equatable {
     case snipOcr
     case startPanorama(save: Bool)
     case toggleRecording(region: Bool)
+    case startDemoType
+    case resetDemoType
     case toggleBreakTimer
     case exit
 }

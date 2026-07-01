@@ -36,6 +36,8 @@ final class ModeCoordinator {
         permissionService: permissionService,
         settingsStore: settingsStore
     )
+    /// Drives DemoType text synthesis from a file or [start]-prefixed clipboard.
+    private lazy var demoTypeController = DemoTypeController(settingsStore: settingsStore)
         /// Drives the full-screen break timer (Control+3).
         private lazy var breakTimerController = BreakTimerController(
             displayManager: displayManager,
@@ -118,6 +120,10 @@ final class ModeCoordinator {
             toggleRecording(region: region)
         case .startPanorama(let save):
             togglePanorama(save: save)
+        case .startDemoType:
+            demoTypeController.startOrStop()
+        case .resetDemoType:
+            demoTypeController.reset()
         case .toggleBreakTimer:
             toggleBreakTimer()
         case .setTool(let tool):

@@ -38,6 +38,15 @@ struct AppSettings: Equatable {
     var snipOcrHotKeyModifiers: UInt
     var recordHotKeyCode: Int
     var recordHotKeyModifiers: UInt
+    /// Virtual key code and modifier-flag raw value for DemoType. A key code of
+    /// 0 disables the hotkey, matching ZoomIt's default behavior.
+    var demoTypeHotKeyCode: Int
+    var demoTypeHotKeyModifiers: UInt
+    /// DemoType script file path, typing speed slider value, and whether user
+    /// keystrokes should drive output.
+    var demoTypeFile: String
+    var demoTypeSpeed: Int
+    var demoTypeUserDriven: Bool
     /// Virtual key code and modifier-flag raw value for the global panorama
     /// (scrolling) capture hotkey. The base shortcut copies the stitched
     /// panorama to the clipboard; the same shortcut with Shift toggled saves it
@@ -119,6 +128,13 @@ struct AppSettings: Equatable {
         // Control+Shift+5 records a selected region.
         recordHotKeyCode: 23,
         recordHotKeyModifiers: 1 << 18,
+        // Control+7 (kVK_ANSI_7 = 26) toggles DemoType;
+        // Control+Shift+7 resets to the previous [end] segment.
+        demoTypeHotKeyCode: 26,
+        demoTypeHotKeyModifiers: 1 << 18,
+        demoTypeFile: "",
+        demoTypeSpeed: 55,
+        demoTypeUserDriven: false,
         // Control+8 (kVK_ANSI_8 = 28) captures a panorama to the clipboard;
         // Control+Shift+8 captures a panorama to a file.
         panoramaHotKeyCode: 28,
@@ -177,6 +193,11 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let snipOcrHotKeyModifiers = "snipOcrHotKeyModifiers"
         static let recordHotKeyCode = "recordHotKeyCode"
         static let recordHotKeyModifiers = "recordHotKeyModifiers"
+        static let demoTypeHotKeyCode = "demoTypeHotKeyCode"
+        static let demoTypeHotKeyModifiers = "demoTypeHotKeyModifiers"
+        static let demoTypeFile = "demoTypeFile"
+        static let demoTypeSpeed = "demoTypeSpeed"
+        static let demoTypeUserDriven = "demoTypeUserDriven"
         static let panoramaHotKeyCode = "panoramaHotKeyCode"
         static let panoramaHotKeyModifiers = "panoramaHotKeyModifiers"
         static let breakHotKeyCode = "breakHotKeyCode"
@@ -300,6 +321,26 @@ final class UserDefaultsSettingsStore: SettingsStore {
             settings.recordHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.recordHotKeyModifiers))
         }
 
+        if defaults.object(forKey: Key.demoTypeHotKeyCode) != nil {
+            settings.demoTypeHotKeyCode = defaults.integer(forKey: Key.demoTypeHotKeyCode)
+        }
+
+        if defaults.object(forKey: Key.demoTypeHotKeyModifiers) != nil {
+            settings.demoTypeHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.demoTypeHotKeyModifiers))
+        }
+
+        if let demoTypeFile = defaults.string(forKey: Key.demoTypeFile) {
+            settings.demoTypeFile = demoTypeFile
+        }
+
+        if defaults.object(forKey: Key.demoTypeSpeed) != nil {
+            settings.demoTypeSpeed = min(max(defaults.integer(forKey: Key.demoTypeSpeed), 10), 100)
+        }
+
+        if defaults.object(forKey: Key.demoTypeUserDriven) != nil {
+            settings.demoTypeUserDriven = defaults.bool(forKey: Key.demoTypeUserDriven)
+        }
+
         if defaults.object(forKey: Key.panoramaHotKeyCode) != nil {
             settings.panoramaHotKeyCode = defaults.integer(forKey: Key.panoramaHotKeyCode)
         }
@@ -421,6 +462,11 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(Int(bitPattern: settings.snipOcrHotKeyModifiers), forKey: Key.snipOcrHotKeyModifiers)
         defaults.set(settings.recordHotKeyCode, forKey: Key.recordHotKeyCode)
         defaults.set(Int(bitPattern: settings.recordHotKeyModifiers), forKey: Key.recordHotKeyModifiers)
+        defaults.set(settings.demoTypeHotKeyCode, forKey: Key.demoTypeHotKeyCode)
+        defaults.set(Int(bitPattern: settings.demoTypeHotKeyModifiers), forKey: Key.demoTypeHotKeyModifiers)
+        defaults.set(settings.demoTypeFile, forKey: Key.demoTypeFile)
+        defaults.set(settings.demoTypeSpeed, forKey: Key.demoTypeSpeed)
+        defaults.set(settings.demoTypeUserDriven, forKey: Key.demoTypeUserDriven)
         defaults.set(settings.panoramaHotKeyCode, forKey: Key.panoramaHotKeyCode)
         defaults.set(Int(bitPattern: settings.panoramaHotKeyModifiers), forKey: Key.panoramaHotKeyModifiers)
         defaults.set(settings.breakHotKeyCode, forKey: Key.breakHotKeyCode)

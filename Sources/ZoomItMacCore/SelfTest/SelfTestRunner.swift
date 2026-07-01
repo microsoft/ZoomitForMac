@@ -24,6 +24,9 @@ public enum SelfTestRunner {
         try testTypingAnnotations()
         try testAnnotationRenderingTouchesPixels()
         try testSettingsRoundTrip()
+        try testDemoTypeSettingsRoundTrip()
+        try testDemoTypeScriptCleaningAndTokens()
+        try testDemoTypeScriptDecoding()
         try testBreakTimerLayout()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -263,6 +266,57 @@ public enum SelfTestRunner {
         try expect(store.load() == settings, "Expected saved settings to round-trip through the store")
 
         defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    private static func testDemoTypeSettingsRoundTrip() throws {
+        let suiteName = "ZoomItMacSelfTest.DemoType.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            throw SelfTestError.failure("Could not create DemoType test UserDefaults suite")
+        }
+        let store = UserDefaultsSettingsStore(defaults: defaults)
+        var settings = AppSettings.defaults
+        settings.demoTypeHotKeyCode = 15
+        settings.demoTypeHotKeyModifiers = NSEvent.ModifierFlags([.control, .option]).rawValue
+        settings.demoTypeFile = "/tmp/demo-type.txt"
+        settings.demoTypeSpeed = 84
+        settings.demoTypeUserDriven = true
+        store.save(settings)
+
+        let loaded = store.load()
+        try expect(loaded.demoTypeHotKeyCode == 15, "Expected DemoType hotkey code to round-trip")
+        try expect(loaded.demoTypeHotKeyModifiers == settings.demoTypeHotKeyModifiers, "Expected DemoType hotkey modifiers to round-trip")
+        try expect(loaded.demoTypeFile == "/tmp/demo-type.txt", "Expected DemoType file to round-trip")
+        try expect(loaded.demoTypeSpeed == 84, "Expected DemoType speed to round-trip")
+        try expect(loaded.demoTypeUserDriven, "Expected DemoType user-driven setting to round-trip")
+
+        defaults.set(250, forKey: "demoTypeSpeed")
+        try expect(store.load().demoTypeSpeed == 100, "Expected DemoType speed to clamp to the Windows slider maximum")
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    private static func testDemoTypeScriptCleaningAndTokens() throws {
+        let cleaned = DemoTypeController.cleanForTesting("\u{0001}\nhello\n[end]\nworld\n[paste]\nchunk\n[/paste]\n[end]\n   ")
+        try expect(cleaned == "hello[end]world\n[paste]chunk[/paste][end]", "Unexpected DemoType cleaned script: \(cleaned)")
+
+        let tokens = DemoTypeController.tokensForTesting("a[pause:2][enter][up][down][left][right][paste]hi[/paste][end]")
+        try expect(tokens == [
+            .text("a"),
+            .pause(2),
+            .key("enter"),
+            .key("up"),
+            .key("down"),
+            .key("left"),
+            .key("right"),
+            .paste("hi"),
+            .end
+        ], "Unexpected DemoType tokens: \(tokens)")
+    }
+
+    private static func testDemoTypeScriptDecoding() throws {
+        try expect(DemoTypeController.decodeForTesting(Data([0xEF, 0xBB, 0xBF]) + Data("utf8".utf8)) == "utf8", "Expected UTF-8 BOM DemoType text")
+        try expect(DemoTypeController.decodeForTesting(Data([0xFF, 0xFE, 0x6C, 0x00, 0x65, 0x00])) == "le", "Expected UTF-16LE DemoType text")
+        try expect(DemoTypeController.decodeForTesting(Data([0xFE, 0xFF, 0x00, 0x62, 0x00, 0x65])) == "be", "Expected UTF-16BE DemoType text")
     }
 
     private static func testBreakTimerLayout() throws {
