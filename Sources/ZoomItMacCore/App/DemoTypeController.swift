@@ -35,9 +35,17 @@ final class DemoTypeController {
         case paste(String)
     }
 
+    struct UserDrivenStepResult: Equatable {
+        var token: TestToken?
+        var ended: Bool
+        var nextOffset: Int
+    }
+
     private static let maxInputSize = 1_048_576
     private static let minTypingDelayMs = 10
     private static let maxTypingDelayMs = 100
+    private static let typingVariance = 1.0
+    private static let injectedEventMarker: Int64 = 0x5A495444
     private static let endControl = "[end]"
     private static let startControl = "[start]"
 
@@ -52,6 +60,7 @@ final class DemoTypeController {
     private var userKeyMonitor: Any?
     private var userEventTap: CFMachPort?
     private var userEventSource: CFRunLoopSource?
+    private var userKeyTimeoutTask: Task<Void, Never>?
 
     init(settingsStore: SettingsStore) {
         self.settingsStore = settingsStore
@@ -66,7 +75,8 @@ final class DemoTypeController {
         do {
             let settings = settingsStore.load()
             try loadTextIfNeeded(settings: settings)
-            let start = index ?? text.startIndex
+            let savedIndex = index ?? text.startIndex
+            let start = savedIndex >= text.endIndex ? text.startIndex : savedIndex
             task = Task { [weak self] in
                 await self?.run(from: start, settings: settings)
             }
@@ -92,29 +102,32 @@ final class DemoTypeController {
 
     private func run(from start: String.Index, settings: AppSettings) async {
         var cursor = start
+        var stoppedAtEndControl = false
         let userDriven = settings.demoTypeUserDriven
-        let injectionRatio = max(1, min(3, settings.demoTypeSpeed / 30 + 1))
-        let delayNanoseconds = UInt64(typingDelayMilliseconds(for: settings.demoTypeSpeed)) * 1_000_000
 
         await waitForHotKeyRelease()
 
         while cursor < text.endIndex, !Task.isCancelled {
             if userDriven {
                 guard await waitForUserKey() else { break }
-                for _ in 0..<injectionRatio where cursor < text.endIndex && !Task.isCancelled {
-                    let result = await emitNextToken(startingAt: cursor, userDriven: true)
-                    cursor = result.nextIndex
-                    if result.ended { break }
+                let result = await emitNextToken(startingAt: cursor, userDriven: true)
+                cursor = result.nextIndex
+                if result.ended {
+                    stoppedAtEndControl = true
+                    break
                 }
             } else {
                 let result = await emitNextToken(startingAt: cursor, userDriven: false)
                 cursor = result.nextIndex
-                if result.ended { break }
-                try? await Task.sleep(nanoseconds: delayNanoseconds)
+                if result.ended {
+                    stoppedAtEndControl = true
+                    break
+                }
+                try? await Task.sleep(nanoseconds: randomTypingDelayNanoseconds(for: settings.demoTypeSpeed))
             }
         }
 
-        if cursor >= text.endIndex {
+        if cursor >= text.endIndex && !stoppedAtEndControl {
             cursor = text.startIndex
         }
         index = cursor
@@ -139,7 +152,7 @@ final class DemoTypeController {
             paste(string)
         case .end:
             segmentStarts.append(token.nextIndex)
-            return (token.nextIndex >= text.endIndex ? text.startIndex : token.nextIndex, true)
+            return (token.nextIndex, true)
         }
         return (token.nextIndex, false)
     }
@@ -251,6 +264,59 @@ final class DemoTypeController {
         return tokens
     }
 
+    static func userDrivenStepForTesting(_ input: String, offset: Int) -> UserDrivenStepResult {
+        let controller = DemoTypeController(settingsStore: UserDefaultsSettingsStore(defaults: UserDefaults(suiteName: "ZoomItMac.DemoTypeController.Test") ?? .standard))
+        controller.text = clean(input)
+        let boundedOffset = min(max(offset, 0), controller.text.count)
+        let cursor = controller.text.index(controller.text.startIndex, offsetBy: boundedOffset)
+        guard let token = controller.nextToken(startingAt: cursor) else {
+            return UserDrivenStepResult(token: nil, ended: false, nextOffset: boundedOffset)
+        }
+        let testToken: TestToken
+        let ended: Bool
+        switch token.value {
+        case .text(let string):
+            testToken = .text(string)
+            ended = false
+        case .key(let keyCode):
+            testToken = .key(keyNameForTesting(keyCode))
+            ended = false
+        case .pause(let seconds):
+            testToken = .pause(seconds)
+            ended = false
+        case .end:
+            testToken = .end
+            ended = true
+        case .paste(let string):
+            testToken = .paste(string)
+            ended = false
+        }
+        return UserDrivenStepResult(
+            token: testToken,
+            ended: ended,
+            nextOffset: controller.text.distance(from: controller.text.startIndex, to: token.nextIndex)
+        )
+    }
+
+    static func completedUserDrivenEntryOffsetForTesting(_ input: String, startOffset: Int) -> Int {
+        let controller = DemoTypeController(settingsStore: UserDefaultsSettingsStore(defaults: UserDefaults(suiteName: "ZoomItMac.DemoTypeController.Test") ?? .standard))
+        controller.text = clean(input)
+        let boundedOffset = min(max(startOffset, 0), controller.text.count)
+        var cursor = controller.text.index(controller.text.startIndex, offsetBy: boundedOffset)
+        var stoppedAtEndControl = false
+        while cursor < controller.text.endIndex, let token = controller.nextToken(startingAt: cursor) {
+            cursor = token.nextIndex
+            if token.value == .end {
+                stoppedAtEndControl = true
+                break
+            }
+        }
+        if cursor >= controller.text.endIndex && !stoppedAtEndControl {
+            cursor = controller.text.startIndex
+        }
+        return controller.text.distance(from: controller.text.startIndex, to: cursor)
+    }
+
     private static func decode(_ data: Data) -> String? {
         if data.starts(with: [0xFF, 0xFE]) {
             return String(data: data.dropFirst(2), encoding: .utf16LittleEndian)
@@ -311,6 +377,21 @@ final class DemoTypeController {
         return (Self.minTypingDelayMs + Self.maxTypingDelayMs) - clamped
     }
 
+    private func randomTypingDelayNanoseconds(for slider: Int) -> UInt64 {
+        let speed = typingDelayMilliseconds(for: slider)
+        let variance = Int(Double(speed) * Self.typingVariance)
+        let lower = max(speed - variance, 1)
+        let upper = max(speed + variance, 1)
+        return UInt64(Int.random(in: lower...upper)) * 1_000_000
+    }
+
+    static func typingDelayRangeForTesting(slider: Int) -> ClosedRange<Int> {
+        let clamped = min(max(slider, minTypingDelayMs), maxTypingDelayMs)
+        let speed = (minTypingDelayMs + maxTypingDelayMs) - clamped
+        let variance = Int(Double(speed) * typingVariance)
+        return max(speed - variance, 1)...max(speed + variance, 1)
+    }
+
     private func waitForHotKeyRelease() async {
         let hotKeyModifierMask: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
         for _ in 0..<100 {
@@ -338,6 +419,10 @@ final class DemoTypeController {
     private func waitForUserKey() async -> Bool {
         await withCheckedContinuation { continuation in
             userKeyContinuation = continuation
+            userKeyTimeoutTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                self?.completeUserKeyWait(shouldContinue: false)
+            }
             if installBlockingUserKeyTap() {
                 return
             }
@@ -359,14 +444,35 @@ final class DemoTypeController {
             eventsOfInterest: mask,
             callback: { _, type, event, userInfo in
                 guard let userInfo else { return Unmanaged.passUnretained(event) }
+                if event.getIntegerValueField(.eventSourceUserData) == DemoTypeController.injectedEventMarker {
+                    return Unmanaged.passUnretained(event)
+                }
+                if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                    let controller = Unmanaged<DemoTypeController>.fromOpaque(userInfo).takeUnretainedValue()
+                    Task { @MainActor in
+                        controller.completeUserKeyWait(shouldContinue: false)
+                    }
+                    return Unmanaged.passUnretained(event)
+                }
+                let flags = event.flags
+                let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+                if !flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift]).isEmpty {
+                    return Unmanaged.passUnretained(event)
+                }
+
+                if type == .keyDown {
+                    return nil
+                }
+
                 if type == .keyUp {
-                    let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
                     let controller = Unmanaged<DemoTypeController>.fromOpaque(userInfo).takeUnretainedValue()
                     Task { @MainActor in
                         controller.completeUserKeyWait(shouldContinue: keyCode != kVK_Escape)
                     }
+                    return nil
+                } else {
+                    return Unmanaged.passUnretained(event)
                 }
-                return nil
             },
             userInfo: selfPointer
         ) else {
@@ -397,6 +503,8 @@ final class DemoTypeController {
     }
 
     private func clearUserKeyWait() {
+        userKeyTimeoutTask?.cancel()
+        userKeyTimeoutTask = nil
         if let userKeyMonitor {
             NSEvent.removeMonitor(userKeyMonitor)
         }
@@ -421,6 +529,8 @@ final class DemoTypeController {
             down?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &value)
             let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
             up?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &value)
+            markInjected(down)
+            markInjected(up)
             down?.post(tap: .cghidEventTap)
             up?.post(tap: .cghidEventTap)
         }
@@ -428,8 +538,12 @@ final class DemoTypeController {
 
     private func postKey(_ keyCode: CGKeyCode) {
         let source = CGEventSource(stateID: .combinedSessionState)
-        CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)?.post(tap: .cghidEventTap)
-        CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)?.post(tap: .cghidEventTap)
+        let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
+        let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+        markInjected(down)
+        markInjected(up)
+        down?.post(tap: .cghidEventTap)
+        up?.post(tap: .cghidEventTap)
     }
 
     private func paste(_ string: String) {
@@ -441,8 +555,14 @@ final class DemoTypeController {
         down?.flags = .maskCommand
         let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
         up?.flags = .maskCommand
+        markInjected(down)
+        markInjected(up)
         down?.post(tap: .cghidEventTap)
         up?.post(tap: .cghidEventTap)
+    }
+
+    private func markInjected(_ event: CGEvent?) {
+        event?.setIntegerValueField(.eventSourceUserData, value: Self.injectedEventMarker)
     }
 
     private func present(_ error: Error) {

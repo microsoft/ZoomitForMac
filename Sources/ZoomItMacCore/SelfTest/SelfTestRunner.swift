@@ -27,6 +27,8 @@ public enum SelfTestRunner {
         try testDemoTypeSettingsRoundTrip()
         try testDemoTypeScriptCleaningAndTokens()
         try testDemoTypeScriptDecoding()
+        try testDemoTypeTypingDelayRange()
+        try testDemoTypeUserDrivenStepStopsAtEnd()
         try testBreakTimerLayout()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -317,6 +319,24 @@ public enum SelfTestRunner {
         try expect(DemoTypeController.decodeForTesting(Data([0xEF, 0xBB, 0xBF]) + Data("utf8".utf8)) == "utf8", "Expected UTF-8 BOM DemoType text")
         try expect(DemoTypeController.decodeForTesting(Data([0xFF, 0xFE, 0x6C, 0x00, 0x65, 0x00])) == "le", "Expected UTF-16LE DemoType text")
         try expect(DemoTypeController.decodeForTesting(Data([0xFE, 0xFF, 0x00, 0x62, 0x00, 0x65])) == "be", "Expected UTF-16BE DemoType text")
+    }
+
+    private static func testDemoTypeTypingDelayRange() throws {
+        try expect(DemoTypeController.typingDelayRangeForTesting(slider: 55) == 1...110, "Expected midpoint DemoType delay to match Windows speed +/- speed")
+        try expect(DemoTypeController.typingDelayRangeForTesting(slider: 100) == 1...20, "Expected fastest DemoType delay range")
+        try expect(DemoTypeController.typingDelayRangeForTesting(slider: 10) == 1...200, "Expected slowest DemoType delay range")
+    }
+
+    private static func testDemoTypeUserDrivenStepStopsAtEnd() throws {
+        let script = "ab[end]cd[end]"
+        let first = DemoTypeController.userDrivenStepForTesting(script, offset: 0)
+        try expect(first == DemoTypeController.UserDrivenStepResult(token: .text("a"), ended: false, nextOffset: 1), "Expected one user key to emit one DemoType token")
+
+        let end = DemoTypeController.userDrivenStepForTesting(script, offset: 2)
+        try expect(end == DemoTypeController.UserDrivenStepResult(token: .end, ended: true, nextOffset: 7), "Expected [end] to stop the active user-driven DemoType entry")
+
+        try expect(DemoTypeController.completedUserDrivenEntryOffsetForTesting(script, startOffset: 7) == script.count, "Expected final [end] to leave DemoType at EOF instead of wrapping in the active entry")
+        try expect(DemoTypeController.completedUserDrivenEntryOffsetForTesting("abc", startOffset: 0) == 0, "Expected scripts without [end] to wrap after EOF")
     }
 
     private static func testBreakTimerLayout() throws {
