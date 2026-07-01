@@ -310,6 +310,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         return field
     }
 
+    private func makeSectionLabel(_ text: String) -> NSTextField {
+        let field = makeLabel(text)
+        field.font = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        return field
+    }
+
     private func makeRow(_ views: [NSView]) -> NSView {
         let stack = NSStackView(views: views)
         stack.orientation = .horizontal
@@ -670,17 +676,37 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func makeDrawTab() -> NSView {
         let help = makeLabel(
-            """
-            Once zoomed, enter drawing mode by pressing the left mouse button; exit drawing mode by pressing the right mouse button.
+            "Once zoomed, enter drawing mode by pressing the left mouse button; exit drawing mode by pressing the right mouse button. Undo with Ctrl+Z and erase all drawing by pressing E.",
+            wraps: true
+        )
 
-            Colors: press R, G, B, O, Y, P, W or K for red, green, blue, orange, yellow, pink, white or black. Hold Shift with a color key (for example Shift+R) to draw with a translucent highlighter of that color (50% opacity). Press the color key again without Shift to return to a solid pen.
+        let penSection = makeSectionLabel("Pen Control")
+        let penHelp = makeLabel(
+            "Change the pen width with the mouse wheel, the [ and ] keys, or Shift with the up and down arrow keys.",
+            wraps: true
+        )
 
-            Shapes: hold Shift for a line, Control for a rectangle, Tab for an ellipse, or Shift+Control for an arrow while dragging.
+        let colorsSection = makeSectionLabel("Colors")
+        let colorsHelp = makeLabel(
+            "Change the pen color by pressing R, G, B, O, Y, P, W or K for red, green, blue, orange, yellow, pink, white or black.",
+            wraps: true
+        )
 
-            Pen: change the width with the mouse wheel, the [ and ] keys, or Shift with the up and down arrow keys. Undo the last drawing with Ctrl+Z and erase everything by pressing E.
+        let highlightSection = makeSectionLabel("Highlight")
+        let highlightHelp = makeLabel(
+            "Hold Shift with a color key, for example Shift+R, to draw with a translucent highlighter of that color. Press the color key again without Shift to return to a solid pen.",
+            wraps: true
+        )
 
-            Screen: press W or K to blank the screen white or black as a sketch pad.
-            """,
+        let shapesSection = makeSectionLabel("Shapes")
+        let shapesHelp = makeLabel(
+            "Hold Shift for a line, Control for a rectangle, Tab for an ellipse, or Shift+Control for an arrow while dragging.",
+            wraps: true
+        )
+
+        let screenSection = makeSectionLabel("Screen")
+        let screenHelp = makeLabel(
+            "Press W or K to blank the screen white or black as a sketch pad.",
             wraps: true
         )
 
@@ -701,7 +727,20 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.drawHotKeyButton = drawHotKeyButton
         let drawHotKeyRow = makeRow([makeLabel("Draw w/out zoom:"), drawHotKeyButton])
 
-        return makeColumn([help, drawHotKeyRow, widthRow])
+        return makeColumn([
+            help,
+            penSection,
+            makeIndentedColumn([penHelp, widthRow]),
+            colorsSection,
+            makeIndentedColumn([colorsHelp]),
+            highlightSection,
+            makeIndentedColumn([highlightHelp]),
+            shapesSection,
+            makeIndentedColumn([shapesHelp]),
+            screenSection,
+            makeIndentedColumn([screenHelp]),
+            drawHotKeyRow
+        ], spacing: 6)
     }
 
     @objc private func penWidthChanged(_ sender: NSSlider) {
