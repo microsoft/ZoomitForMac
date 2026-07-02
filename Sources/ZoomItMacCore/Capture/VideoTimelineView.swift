@@ -38,6 +38,9 @@ protocol VideoTimelineViewDelegate: AnyObject {
     /// or scrubbed. `scrubbing` is true while a drag is in flight.
     func timelineDidChangeSelection(start: Double, end: Double)
     func timelineDidScrub(to position: Double, scrubbing: Bool)
+    func timelineDidChangePendingDelete(start: Double, end: Double)
+    func timelineDidCommitDeleteSelection()
+    func timelineDidRequestUndo()
 }
 
 /// A custom scrub bar mirroring ZoomIt's trim timeline: a full-duration track
@@ -57,9 +60,13 @@ final class VideoTimelineView: NSView {
     var position: Double = 0 { didSet { needsDisplay = true } }
     /// Boundary times (seconds) of appended clips, drawn as markers.
     var clipBoundaries: [Double] = [] { didSet { needsDisplay = true } }
+    /// Times where a deleted range was stitched back together.
+    var deleteJoinMarkers: [Double] = [] { didSet { needsDisplay = true } }
 
-    private enum Drag { case none, start, end, playhead }
+    private enum Drag { case none, start, end, playhead, deleteStart, deleteEnd }
     private var drag: Drag = .none
+    private var pendingDeleteStart: Double?
+    private var pendingDeleteEnd: Double?
 
     private let pad: CGFloat = 14
     private let trackHeight: CGFloat = 10
@@ -105,6 +112,10 @@ final class VideoTimelineView: NSView {
         ctx.addPath(CGPath(roundedRect: active, cornerWidth: radius, cornerHeight: radius, transform: nil))
         ctx.fillPath()
 
+        if let pendingDeleteStart, let pendingDeleteEnd {
+            drawDeleteRegion(from: pendingDeleteStart, to: pendingDeleteEnd, in: track)
+        }
+
         // Appended-clip boundary markers.
         ctx.setStrokeColor(NSColor(white: 0.05, alpha: 0.9).cgColor)
         ctx.setLineWidth(2)
@@ -115,12 +126,18 @@ final class VideoTimelineView: NSView {
             ctx.strokePath()
         }
 
+        drawDeleteJoinMarkers(in: track)
+
         // Tick labels.
         drawTicks(in: track)
 
         // Grips.
         drawGrip(at: startX, in: track)
         drawGrip(at: endX, in: track)
+        if let pendingDeleteStart, let pendingDeleteEnd {
+            drawDeleteGrip(at: x(for: pendingDeleteStart), in: track)
+            drawDeleteGrip(at: x(for: pendingDeleteEnd), in: track)
+        }
 
         // Playhead.
         let px = x(for: position)
@@ -145,6 +162,49 @@ final class VideoTimelineView: NSView {
         ctx.move(to: CGPoint(x: gx, y: rect.minY + 6))
         ctx.addLine(to: CGPoint(x: gx, y: rect.maxY - 6))
         ctx.strokePath()
+    }
+
+    private func drawDeleteRegion(from start: Double, to end: Double, in track: CGRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let startX = x(for: min(start, end))
+        let endX = x(for: max(start, end))
+        let markerTop = track.minY - 12
+        let markerBottom = track.maxY + 12
+        ctx.setFillColor(NSColor.systemRed.withAlphaComponent(0.28).cgColor)
+        ctx.fill(CGRect(x: startX, y: markerTop, width: max(1, endX - startX), height: markerBottom - markerTop))
+        ctx.setStrokeColor(NSColor.systemRed.cgColor)
+        ctx.setLineWidth(2)
+        for markerX in [startX, endX] {
+            ctx.move(to: CGPoint(x: markerX, y: markerTop))
+            ctx.addLine(to: CGPoint(x: markerX, y: markerBottom))
+            ctx.strokePath()
+        }
+    }
+
+    private func drawDeleteGrip(at gx: CGFloat, in track: CGRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let rect = CGRect(x: gx - gripHalf, y: track.midY - gripHeight / 2,
+                          width: gripHalf * 2, height: gripHeight)
+        ctx.setFillColor(NSColor.systemRed.cgColor)
+        ctx.addPath(CGPath(roundedRect: rect, cornerWidth: 4, cornerHeight: 4, transform: nil))
+        ctx.fillPath()
+        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.85).cgColor)
+        ctx.setLineWidth(2)
+        ctx.move(to: CGPoint(x: gx, y: rect.minY + 6))
+        ctx.addLine(to: CGPoint(x: gx, y: rect.maxY - 6))
+        ctx.strokePath()
+    }
+
+    private func drawDeleteJoinMarkers(in track: CGRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.setStrokeColor(NSColor.systemRed.cgColor)
+        ctx.setLineWidth(2)
+        for marker in deleteJoinMarkers where marker > 0 && marker < duration {
+            let markerX = x(for: marker)
+            ctx.move(to: CGPoint(x: markerX, y: track.minY - 10))
+            ctx.addLine(to: CGPoint(x: markerX, y: track.maxY + 10))
+            ctx.strokePath()
+        }
     }
 
     private func drawTicks(in track: CGRect) {
@@ -172,9 +232,21 @@ final class VideoTimelineView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
         let p = convert(event.locationInWindow, from: nil)
         let startX = x(for: trimStart), endX = x(for: trimEnd), pos = x(for: position)
         let dStart = abs(p.x - startX), dEnd = abs(p.x - endX), dPos = abs(p.x - pos)
+        if let pendingDeleteStart, let pendingDeleteEnd {
+            let deleteStartX = x(for: pendingDeleteStart)
+            let deleteEndX = x(for: pendingDeleteEnd)
+            let dDeleteStart = abs(p.x - deleteStartX)
+            let dDeleteEnd = abs(p.x - deleteEndX)
+            if dDeleteStart <= gripHalf + 5 || dDeleteEnd <= gripHalf + 5 {
+                drag = dDeleteStart <= dDeleteEnd ? .deleteStart : .deleteEnd
+                handleDrag(p)
+                return
+            }
+        }
         // Prefer the playhead when it is within reach, even when sitting on top
         // of a grip, so it can always be dragged away. Otherwise pick the
         // nearest grip.
@@ -196,7 +268,57 @@ final class VideoTimelineView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         if drag == .playhead { delegate?.timelineDidScrub(to: position, scrubbing: false) }
+        normalizePendingDelete()
         drag = .none
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        let p = convert(event.locationInWindow, from: nil)
+        let t = time(forX: p.x)
+        drag = .deleteEnd
+        pendingDeleteStart = t
+        pendingDeleteEnd = t
+        position = t
+        delegate?.timelineDidScrub(to: position, scrubbing: true)
+        delegate?.timelineDidChangePendingDelete(start: t, end: t)
+        needsDisplay = true
+    }
+
+    override func rightMouseDragged(with event: NSEvent) {
+        handleDrag(convert(event.locationInWindow, from: nil))
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        handleDrag(convert(event.locationInWindow, from: nil))
+        normalizePendingDelete()
+        if let pendingDeleteStart, let pendingDeleteEnd, pendingDeleteEnd - pendingDeleteStart < 0.05 {
+            clearPendingDeleteSelection()
+        }
+        drag = .none
+        if let pendingDeleteEnd {
+            delegate?.timelineDidScrub(to: pendingDeleteEnd, scrubbing: false)
+        }
+        needsDisplay = true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "z" {
+            delegate?.timelineDidRequestUndo()
+            return
+        }
+        if event.keyCode == 51 || event.keyCode == 117 {
+            delegate?.timelineDidCommitDeleteSelection()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    func clearPendingDeleteSelection() {
+        pendingDeleteStart = nil
+        pendingDeleteEnd = nil
+        needsDisplay = true
     }
 
     private func handleDrag(_ p: CGPoint) {
@@ -215,8 +337,32 @@ final class VideoTimelineView: NSView {
         case .playhead:
             position = t
             delegate?.timelineDidScrub(to: position, scrubbing: true)
+        case .deleteStart:
+            pendingDeleteStart = t
+            position = t
+            delegate?.timelineDidScrub(to: position, scrubbing: true)
+            sendPendingDeleteChange()
+            needsDisplay = true
+        case .deleteEnd:
+            pendingDeleteEnd = t
+            position = t
+            delegate?.timelineDidScrub(to: position, scrubbing: true)
+            sendPendingDeleteChange()
+            needsDisplay = true
         case .none:
             break
         }
+    }
+
+    private func normalizePendingDelete() {
+        guard let pendingDeleteStart, let pendingDeleteEnd else { return }
+        self.pendingDeleteStart = min(pendingDeleteStart, pendingDeleteEnd)
+        self.pendingDeleteEnd = max(pendingDeleteStart, pendingDeleteEnd)
+        sendPendingDeleteChange()
+    }
+
+    private func sendPendingDeleteChange() {
+        guard let pendingDeleteStart, let pendingDeleteEnd else { return }
+        delegate?.timelineDidChangePendingDelete(start: min(pendingDeleteStart, pendingDeleteEnd), end: max(pendingDeleteStart, pendingDeleteEnd))
     }
 }
