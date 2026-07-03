@@ -196,7 +196,6 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         transitionPopup.action = #selector(transitionChanged)
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel))
         cancel.bezelStyle = .rounded
-        cancel.keyEquivalent = "\u{1b}"
         let save = NSButton(title: "Save…", target: self, action: #selector(save))
         save.bezelStyle = .rounded
         save.keyEquivalent = "\r"
@@ -667,8 +666,16 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
             let transform = CGAffineTransform(scaleX: scale, y: scale).concatenating(CGAffineTransform(translationX: tx, y: ty))
             layer.setTransform(transform, at: seg.start)
         }
-        for (time, kind) in fades where kind != .none {
-            let ranges = transitionRanges(at: time, fadeDuration: fadeDur, compositionDuration: comp.duration)
+        // Opacity ramps for all fades live on a single layer instruction, so
+        // adjacent fades must not overlap or `setOpacityRamp` throws. Clamp each
+        // fade against its neighbouring faded boundaries (splitting the gap so
+        // ramps meet at the midpoint) and against the composition edges.
+        for (index, entry) in fades.enumerated() {
+            let time = entry.0
+            let previousBoundary = index > 0 ? fades[index - 1].0 : nil
+            let nextBoundary = index < fades.count - 1 ? fades[index + 1].0 : nil
+            let ranges = transitionRanges(at: time, fadeDuration: fadeDur, compositionDuration: comp.duration,
+                                          previousBoundary: previousBoundary, nextBoundary: nextBoundary)
             if let outRange = ranges.out {
                 layer.setOpacityRamp(fromStartOpacity: 1, toEndOpacity: 0, timeRange: outRange)
             }
@@ -693,10 +700,26 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         return Built(composition: comp, videoComposition: vc, audioMix: audioMix)
     }
 
-    private func transitionRanges(at time: CMTime, fadeDuration: CMTime, compositionDuration: CMTime) -> (out: CMTimeRange?, in: CMTimeRange?) {
+    private func transitionRanges(at time: CMTime, fadeDuration: CMTime, compositionDuration: CMTime,
+                                  previousBoundary: CMTime? = nil, nextBoundary: CMTime? = nil) -> (out: CMTimeRange?, in: CMTimeRange?) {
         let timescale = fadeDuration.timescale
-        let outSeconds = min(fadeDuration.seconds, max(0, time.seconds))
-        let inSeconds = min(fadeDuration.seconds, max(0, compositionDuration.seconds - time.seconds))
+        // Available space before this boundary: to the composition start, or to
+        // the midpoint with the previous faded boundary so the two ramps meet
+        // instead of overlapping.
+        let spaceBefore: Double
+        if let previousBoundary {
+            spaceBefore = max(0, (time.seconds - previousBoundary.seconds) / 2)
+        } else {
+            spaceBefore = max(0, time.seconds)
+        }
+        let spaceAfter: Double
+        if let nextBoundary {
+            spaceAfter = max(0, (nextBoundary.seconds - time.seconds) / 2)
+        } else {
+            spaceAfter = max(0, compositionDuration.seconds - time.seconds)
+        }
+        let outSeconds = min(fadeDuration.seconds, spaceBefore)
+        let inSeconds = min(fadeDuration.seconds, spaceAfter)
         let outDuration = CMTime(seconds: outSeconds, preferredTimescale: timescale)
         let inDuration = CMTime(seconds: inSeconds, preferredTimescale: timescale)
         let outRange = outSeconds > 0 ? CMTimeRange(start: CMTimeSubtract(time, outDuration), duration: outDuration) : nil
