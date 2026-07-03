@@ -206,6 +206,14 @@ final class ZoomCanvasView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // Some devices/contexts deliver a right-click over this overlay as a
+        // leftMouseDown carrying buttonNumber 1 (the secondary button) rather
+        // than a rightMouseDown. Route the secondary button to the right-click
+        // handler so it still exits drawing mode.
+        if event.buttonNumber == 1 {
+            rightMouseDown(with: event)
+            return
+        }
         pointerViewPoint = convert(event.locationInWindow, from: nil)
 
         if isSelectingRegion {
@@ -262,6 +270,10 @@ final class ZoomCanvasView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if event.buttonNumber == 1 {
+            rightMouseUp(with: event)
+            return
+        }
         pointerViewPoint = convert(event.locationInWindow, from: nil)
         if isSelectingRegion {
             finishRegionSnip()
