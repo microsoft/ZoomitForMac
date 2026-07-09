@@ -1,5 +1,5 @@
 import AppKit
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
 
 /// Draws a blue capture border plus an instruction banner around the panorama
 /// region. It lives in a click-through, non-shareable window so it never

@@ -1,5 +1,5 @@
 import AppKit
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
 
 struct CapturedFrame {
     var image: CGImage
