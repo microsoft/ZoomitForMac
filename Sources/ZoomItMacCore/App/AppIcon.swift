@@ -23,8 +23,15 @@ enum ZoomItAppIcon {
     }
 
     private static func loadImage(named name: String) -> NSImage? {
-        guard let url = Bundle.module.url(forResource: name, withExtension: "png"),
-              let image = NSImage(contentsOf: url) else {
+        // In the packaged .app the resources are flattened into
+        // Contents/Resources and resolved via Bundle.main. Fall back to
+        // Bundle.module for local `swift run` / test builds, where the
+        // resources live in the SwiftPM-generated resource bundle. Bundle.main
+        // is tried first so Bundle.module (which fatal-errors when its bundle
+        // is absent) is never touched in the packaged app.
+        let url = Bundle.main.url(forResource: name, withExtension: "png")
+            ?? Bundle.module.url(forResource: name, withExtension: "png")
+        guard let url, let image = NSImage(contentsOf: url) else {
             return nil
         }
         return image
