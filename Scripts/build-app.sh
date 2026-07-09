@@ -15,13 +15,13 @@ rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
 
 cp "$BIN_DIR/ZoomIt" "$APP_PATH/Contents/MacOS/ZoomIt"
-# The SwiftPM-generated Bundle.module accessor for the ZoomItMacCore target
-# looks for its resource bundle at Bundle.main.bundleURL (the .app root) and at
-# the absolute .build path baked in at compile time. It does NOT look in
-# Contents/Resources. Placing the bundle there works on the build machine (via
-# the baked .build path) but crashes on every other Mac. Copy it to the .app
-# root so Bundle.module finds it after distribution.
-cp -R "$BIN_DIR/ZoomItMac_ZoomItMacCore.bundle" "$APP_PATH/ZoomItMac_ZoomItMacCore.bundle"
+# Copy the SwiftPM-generated resources directly into Contents/Resources.
+# A code-signed .app may only contain Contents/ at its root, so the nested
+# ZoomItMac_ZoomItMacCore.bundle cannot live at the app root (codesign fails
+# with "unsealed contents present in the bundle root"). Flattening the bundle's
+# resources into Contents/Resources lets the app resolve them via Bundle.main
+# (see AppIcon.loadImage) while keeping the bundle codesign-valid.
+cp -R "$BIN_DIR/ZoomItMac_ZoomItMacCore.bundle/." "$APP_PATH/Contents/Resources/"
 
 if [[ -f "$ICON_SOURCE" ]] && command -v sips >/dev/null && command -v iconutil >/dev/null; then
     ICONSET="$(mktemp -d)/ZoomIt.iconset"
