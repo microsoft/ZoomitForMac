@@ -97,7 +97,7 @@ Testers should run the bundled app, not `swift run`. Build a release app bundle:
 zsh Scripts/build-app.sh release
 ```
 
-This produces `.build/ZoomIt.app` with the app icon, the bundled resources, and an `Info.plist` declaring the microphone and camera usage descriptions. The build is for the architecture of the build machine; build on Apple Silicon for Apple Silicon testers.
+This produces `.build/ZoomIt.app` with the app icon, the bundled resources, and an `Info.plist` declaring the microphone and camera usage descriptions. `release` builds are **Universal** (Apple Silicon + Intel) by default; `debug` builds are native to the build machine for speed. Override the architectures with `ZOOMIT_ARCHS` (e.g. `ZOOMIT_ARCHS=arm64`). A Universal build routes through Xcode's build system, so it requires a **full Xcode** install — with only the Command Line Tools the script warns and falls back to a native build. The build summary prints the resulting architectures.
 
 ### Bundle identity: dev vs. official
 
