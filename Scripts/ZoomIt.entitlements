@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Under the hardened runtime (required for notarization), camera and
+         microphone access are gated by these entitlements in addition to the
+         usual TCC prompt. Without them the notarized app is denied the webcam
+         overlay and microphone recording. Screen Recording is pure TCC and
+         needs no entitlement. The app is intentionally NOT sandboxed. -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

@@ -38,8 +38,10 @@ Launch at login requires running ZoomIt as an app bundle so macOS attributes the
 
 ```sh
 zsh Scripts/build-app.sh
-open .build/ZoomIt.app
+open ".build/ZoomIt (Dev).app"
 ```
+
+The contributor build is named `ZoomIt (Dev).app` (bundle id `com.sysinternals.zoomitmac.dev`) so it stays distinct from an installed official `ZoomIt.app` in the Screen Recording list. See [Bundle identity](#bundle-identity-dev-vs-official) below.
 
 ## Default Hotkeys
 
@@ -95,15 +97,33 @@ Testers should run the bundled app, not `swift run`. Build a release app bundle:
 zsh Scripts/build-app.sh release
 ```
 
-This produces `.build/ZoomIt.app` with the app icon, the bundled resources, and an `Info.plist` (bundle id `com.sysinternals.zoomitmac`) declaring the microphone and camera usage descriptions. The build is for the architecture of the build machine; build on Apple Silicon for Apple Silicon testers.
+This produces `.build/ZoomIt.app` with the app icon, the bundled resources, and an `Info.plist` declaring the microphone and camera usage descriptions. The build is for the architecture of the build machine; build on Apple Silicon for Apple Silicon testers.
+
+### Bundle identity: dev vs. official
+
+`Scripts/build-app.sh` picks the bundle identity from the signing identity so a locally built copy never fights the officially distributed app over macOS privacy (TCC) grants, which are keyed by bundle id **and** code-signing requirement:
+
+- **Contributor / ad-hoc build (default):** app bundle `ZoomIt (Dev).app`, bundle id `com.sysinternals.zoomitmac.dev`, display name “ZoomIt (Dev)”, ad-hoc signed. Both the distinct file name and bundle id keep it separate from an installed official `ZoomIt.app`, so its Screen Recording grant is its own row in System Settings and the two never clobber each other.
+- **Official build:** pass a real Developer ID identity and it keeps the canonical `com.sysinternals.zoomitmac` id:
+
+  ```sh
+  ZOOMIT_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+    zsh Scripts/build-app.sh release
+  ```
+
+Override any field explicitly with `ZOOMIT_SIGN_IDENTITY`, `ZOOMIT_BUNDLE_ID`, and `ZOOMIT_DISPLAY_NAME`. Because a real signing identity has a stable, team-based designated requirement, the official app keeps its Screen Recording permission across updates; an ad-hoc build cannot share that grant since contributors don't have the certificate.
+
+### Entitlements (camera & microphone)
+
+`build-app.sh` signs the bundle with `Scripts/ZoomIt.entitlements`, which grants `com.apple.security.device.camera` and `com.apple.security.device.audio-input`. Under the hardened runtime (used by notarized builds) these are **required** for the webcam overlay and microphone recording — without them macOS denies both even after the user approves the TCC prompt. Screen Recording is pure TCC and needs no entitlement. The entitlements are embedded even for ad-hoc builds so that when the official pipeline re-signs the bundle with ESRP (`MacAppDeveloperSign`), the existing entitlements are preserved. Verify on the first signed build with `codesign -d --entitlements :- ZoomIt.app`.
 
 ### Signing options
 
 - **Distributing widely (recommended):** sign with a Developer ID Application certificate, notarize with Apple, and staple the ticket, then zip or wrap the app in a `.dmg`:
 
   ```sh
-  codesign --deep --force --options runtime \
-    --sign "Developer ID Application: Your Name (TEAMID)" .build/ZoomIt.app
+  ZOOMIT_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+    zsh Scripts/build-app.sh release
   ditto -c -k --keepParent .build/ZoomIt.app ZoomIt.zip
   xcrun notarytool submit ZoomIt.zip --apple-id you@example.com \
     --team-id TEAMID --password APP_SPECIFIC_PASSWORD --wait

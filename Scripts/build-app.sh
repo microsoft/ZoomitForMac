@@ -3,8 +3,37 @@ set -euo pipefail
 
 ROOT_DIR="${0:A:h:h}"
 CONFIGURATION="${1:-debug}"
-APP_PATH="$ROOT_DIR/.build/ZoomIt.app"
 ICON_SOURCE="$ROOT_DIR/Sources/ZoomItMacCore/Resources/ZoomItColorIcon.png"
+ENTITLEMENTS="$ROOT_DIR/Scripts/ZoomIt.entitlements"
+
+# Signing identity controls which "flavor" of the app is produced.
+#   - Ad-hoc (the default, "-"): a contributor build that cannot reproduce the
+#     official Developer ID signature. It uses a distinct .dev bundle id so its
+#     Screen Recording (and other TCC) grant is a separate entry that never
+#     collides with the officially distributed com.sysinternals.zoomitmac app.
+#   - A real identity (e.g. "Developer ID Application: Your Name (TEAMID)"): the
+#     official build, which keeps the canonical bundle id so its TCC grant is
+#     stable across updates.
+# Override any of these via the environment:
+#   ZOOMIT_SIGN_IDENTITY, ZOOMIT_BUNDLE_ID, ZOOMIT_DISPLAY_NAME
+SIGN_IDENTITY="${ZOOMIT_SIGN_IDENTITY:--}"
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    BUNDLE_ID="${ZOOMIT_BUNDLE_ID:-com.sysinternals.zoomitmac.dev}"
+    DISPLAY_NAME="${ZOOMIT_DISPLAY_NAME:-ZoomIt (Dev)}"
+    SIGN_DESC="ad-hoc"
+else
+    BUNDLE_ID="${ZOOMIT_BUNDLE_ID:-com.sysinternals.zoomitmac}"
+    DISPLAY_NAME="${ZOOMIT_DISPLAY_NAME:-ZoomIt}"
+    SIGN_DESC="$SIGN_IDENTITY"
+fi
+
+# Name the .app bundle after the display name so a contributor's
+# "ZoomIt (Dev).app" never collides with the official "ZoomIt.app" on disk.
+# Two identically named bundles get conflated by LaunchServices and appear as a
+# single row in System Settings > Screen Recording, making it impossible to
+# grant the dev build its own permission.
+APP_NAME="${ZOOMIT_APP_NAME:-${DISPLAY_NAME}.app}"
+APP_PATH="$ROOT_DIR/.build/$APP_NAME"
 
 cd "$ROOT_DIR"
 
@@ -39,7 +68,7 @@ if [[ -f "$ICON_SOURCE" ]] && command -v sips >/dev/null && command -v iconutil 
     iconutil -c icns "$ICONSET" -o "$APP_PATH/Contents/Resources/ZoomIt.icns"
 fi
 
-cat > "$APP_PATH/Contents/Info.plist" <<'PLIST'
+cat > "$APP_PATH/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -47,17 +76,17 @@ cat > "$APP_PATH/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>ZoomIt</string>
+    <string>$DISPLAY_NAME</string>
     <key>CFBundleExecutable</key>
     <string>ZoomIt</string>
     <key>CFBundleIconFile</key>
     <string>ZoomIt</string>
     <key>CFBundleIdentifier</key>
-    <string>com.sysinternals.zoomitmac</string>
+    <string>$BUNDLE_ID</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>ZoomIt</string>
+    <string>$DISPLAY_NAME</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -76,12 +105,31 @@ cat > "$APP_PATH/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# Ad-hoc sign the completed bundle so macOS privacy services see the real
-# CFBundleIdentifier and sealed bundle layout. The explicit designated
-# requirement keeps local TCC grants stable across rebuilds without using a
-# signing certificate.
-codesign --force --deep --sign - \
-    --requirements '=designated => identifier "com.sysinternals.zoomitmac"' \
-    "$APP_PATH" >/dev/null
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    # Ad-hoc sign the completed bundle so macOS privacy services see the real
+    # CFBundleIdentifier and sealed bundle layout. The explicit designated
+    # requirement keeps local TCC grants stable across rebuilds without using a
+    # signing certificate. The .dev bundle id keeps this grant separate from the
+    # officially distributed app so the two never fight over one TCC record.
+    # Entitlements are embedded even for ad-hoc builds so the ESRP re-sign in
+    # the official pipeline preserves them, and so local hardened-runtime tests
+    # can still reach the camera and microphone.
+    codesign --force --deep --sign - \
+        --entitlements "$ENTITLEMENTS" \
+        --requirements "=designated => identifier \"$BUNDLE_ID\"" \
+        "$APP_PATH" >/dev/null
+else
+    # Official build: sign with the provided Developer ID identity and enable
+    # the hardened runtime so the app can be notarized. codesign derives the
+    # designated requirement from the certificate, so the TCC grant stays
+    # stable across signed updates. The entitlements grant camera/microphone
+    # access under the hardened runtime.
+    codesign --force --options runtime --sign "$SIGN_IDENTITY" \
+        --entitlements "$ENTITLEMENTS" \
+        "$APP_PATH" >/dev/null
+fi
 
 echo "$APP_PATH"
+echo "  bundle id:    $BUNDLE_ID" >&2
+echo "  display name: $DISPLAY_NAME" >&2
+echo "  signed with:  $SIGN_DESC" >&2

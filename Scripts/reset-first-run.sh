@@ -18,9 +18,16 @@
 
 set -euo pipefail
 
-BUNDLE_ID="com.sysinternals.zoomitmac"
+# Match the bundle id produced by Scripts/build-app.sh. Contributor (ad-hoc)
+# builds use the .dev id so their privacy grants stay separate from the
+# officially distributed com.sysinternals.zoomitmac app. Override with
+# ZOOMIT_BUNDLE_ID to reset a differently-identified build.
+BUNDLE_ID="${ZOOMIT_BUNDLE_ID:-com.sysinternals.zoomitmac.dev}"
 ROOT_DIR="${0:A:h:h}"
-APP_PATH="$ROOT_DIR/.build/ZoomIt.app"
+# build-app.sh names the bundle after the display name, so the contributor
+# build is "ZoomIt (Dev).app". Override with ZOOMIT_APP_NAME if you changed it.
+APP_NAME="${ZOOMIT_APP_NAME:-ZoomIt (Dev).app}"
+APP_PATH="$ROOT_DIR/.build/$APP_NAME"
 
 keep_settings=false
 launch=true
@@ -40,7 +47,7 @@ for arg in "$@"; do
 done
 
 echo "Quitting any running ZoomIt instance…"
-pkill -f "ZoomIt.app/Contents/MacOS/ZoomIt" 2>/dev/null || true
+pkill -f "/Contents/MacOS/ZoomIt" 2>/dev/null || true
 sleep 1
 
 echo "Resetting privacy permissions (Screen Recording, Microphone, Camera) for $BUNDLE_ID…"
