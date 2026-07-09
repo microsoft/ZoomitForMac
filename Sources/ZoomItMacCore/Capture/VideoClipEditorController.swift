@@ -2,12 +2,56 @@ import AppKit
 import AVFoundation
 import AVKit
 
+@MainActor
+private final class VideoEditorWindow: NSWindow {
+    weak var editorController: VideoClipEditorController?
+
+    override func keyDown(with event: NSEvent) {
+        if editorController?.handleEditorKey(event) == true { return }
+        super.keyDown(with: event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if editorController?.handleEditorKey(event) == true { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
 /// Shows ZoomIt's recording in a clip editor before saving, mirroring the
 /// Windows trim dialog: preview, a scrub timeline with trim grips, transport
 /// controls, append-with-transition, and Save. Styled for macOS.
 @MainActor
 final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimelineViewDelegate {
-    enum Transition { case none, fadeBlack, fadeWhite }
+    enum Transition: CaseIterable {
+        case fadeBlack, none, fadeWhite
+
+        var title: String {
+            switch self {
+            case .fadeBlack: "Fade to Black"
+            case .none: "No Transition"
+            case .fadeWhite: "Fade to White"
+            }
+        }
+    }
+
+    private enum JoinKind { case append, delete }
+
+    private struct EditorSnapshot {
+        let segments: [ClipSegment]
+        let joinTransitions: [Transition]
+        let joinKinds: [JoinKind]
+        let trimStart: Double
+        let trimEnd: Double
+        let seekPosition: Double
+    }
+
+    private struct ClipSegment {
+        var asset: AVURLAsset
+        var range: CMTimeRange
+
+        var duration: CMTime { range.duration }
+        var durationSeconds: Double { max(range.duration.seconds, 0) }
+    }
 
     private var window: NSWindow?
     private var playerView: AVPlayerView!
@@ -17,11 +61,15 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
     private var playButton: NSButton!
     private var volumeButton: NSButton!
     private var volumeSlider: NSSlider!
+    private var transitionPopup: NSPopUpButton!
+    private var deleteButton: NSButton!
 
-    /// The clips making up the composition (in order). The first is the
-    /// original recording; more are appended by the user.
-    private var clips: [AVURLAsset] = []
-    private var transitions: [Transition] = []
+    /// The segments making up the composition (in order). The first starts as
+    /// the original recording; more are appended or split by delete edits.
+    private var segments: [ClipSegment] = []
+    private var joinTransitions: [Transition] = []
+    private var joinKinds: [JoinKind] = []
+    private var selectedTransition: Transition = .fadeBlack
     private var duration: Double = 0
     private var trimStart: Double = 0
     private var trimEnd: Double = 0
@@ -29,6 +77,9 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
     private var isPlaying = false
     private var isMuted = false
     private var lastAudibleVolume: Float = 1
+    private var pendingDeleteStart: Double?
+    private var pendingDeleteEnd: Double?
+    private var undoStack: [EditorSnapshot] = []
 
     private var onSave: ((URL) -> Void)?
     private var onCancel: (() -> Void)?
@@ -47,21 +98,27 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         self.preferredWindowLevel = windowLevel
         self.originalURL = tempURL
         let asset = AVURLAsset(url: tempURL)
-        clips = [asset]
-        transitions = []
+        segments = [ClipSegment(asset: asset, range: CMTimeRange(start: .zero, duration: asset.duration))]
+        joinTransitions = []
+        joinKinds = []
+        selectedTransition = .fadeBlack
         duration = max(asset.duration.seconds, 0.1)
         trimStart = 0
         trimEnd = duration
+        pendingDeleteStart = nil
+        pendingDeleteEnd = nil
+        undoStack = []
         buildWindow()
         rebuildPlayer()
     }
 
     private func buildWindow() {
-        let win = NSWindow(
+        let win = VideoEditorWindow(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered, defer: false
         )
+        win.editorController = self
         win.title = "ZoomIt: Edit Recording"
         win.delegate = self
         win.center()
@@ -123,13 +180,29 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
 
         let append = NSButton(title: "Append…", target: self, action: #selector(appendClip))
         append.bezelStyle = .rounded
+        deleteButton = NSButton(title: "Delete Region", target: self, action: #selector(commitPendingDelete))
+        deleteButton.bezelStyle = .rounded
+        deleteButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+        deleteButton.imagePosition = .imageLeading
+        deleteButton.contentTintColor = .systemRed
+        deleteButton.toolTip = "Delete selected timeline region (Delete). Undo with Command-Z."
+        deleteButton.isEnabled = false
+        let transitionLabel = NSTextField(labelWithString: "Transition:")
+        transitionLabel.textColor = .secondaryLabelColor
+        transitionPopup = NSPopUpButton()
+        transitionPopup.addItems(withTitles: Transition.allCases.map(\.title))
+        transitionPopup.selectItem(at: Transition.allCases.firstIndex(of: selectedTransition) ?? 0)
+        transitionPopup.target = self
+        transitionPopup.action = #selector(transitionChanged)
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel))
         cancel.bezelStyle = .rounded
-        cancel.keyEquivalent = "\u{1b}"
         let save = NSButton(title: "Save…", target: self, action: #selector(save))
         save.bezelStyle = .rounded
         save.keyEquivalent = "\r"
-        let bottom = NSStackView(views: [append, NSView(), cancel, save])
+        let transitionControls = NSStackView(views: [transitionLabel, transitionPopup])
+        transitionControls.spacing = 6
+        transitionControls.alignment = .centerY
+        let bottom = NSStackView(views: [append, deleteButton, transitionControls, NSView(), cancel, save])
         bottom.spacing = 12
         bottom.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(bottom)
@@ -196,6 +269,7 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         if trimEnd <= 0 || trimEnd > duration { trimEnd = duration }
         let item = AVPlayerItem(asset: comp.composition)
         item.videoComposition = comp.videoComposition
+        item.audioMix = comp.audioMix
         let p = AVPlayer(playerItem: item)
         p.volume = volumeSlider?.floatValue ?? 1
         p.isMuted = isMuted
@@ -227,9 +301,16 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         timeline.duration = duration
         timeline.trimStart = trimStart
         timeline.trimEnd = trimEnd
-        var bound = 0.0; var marks: [Double] = []
-        for c in clips.dropLast() { bound += c.duration.seconds; marks.append(bound) }
-        timeline.clipBoundaries = marks
+        var bound = 0.0; var appendMarks: [Double] = []; var deleteMarks: [Double] = []
+        for index in 0..<max(0, segments.count - 1) {
+            bound += segments[index].durationSeconds
+            switch joinKinds[index] {
+            case .append: appendMarks.append(bound)
+            case .delete: deleteMarks.append(bound)
+            }
+        }
+        timeline.clipBoundaries = appendMarks
+        timeline.deleteJoinMarkers = deleteMarks
     }
 
     @objc private func togglePlay() { isPlaying ? pause() : play() }
@@ -289,6 +370,37 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
 
     func timelineDidChangeSelection(start: Double, end: Double) { trimStart = start; trimEnd = end }
     func timelineDidScrub(to position: Double, scrubbing: Bool) { pause(); seek(position) }
+    func timelineDidChangePendingDelete(start: Double, end: Double) {
+        pendingDeleteStart = start
+        pendingDeleteEnd = end
+        syncDeleteButton()
+    }
+    func timelineDidCommitDeleteSelection() { commitPendingDelete() }
+    func timelineDidRequestUndo() { undoLastEdit() }
+
+    fileprivate func handleEditorKey(_ event: NSEvent) -> Bool {
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "z" {
+            undoLastEdit()
+            return true
+        }
+        if event.keyCode == 51 || event.keyCode == 117 {
+            commitPendingDelete()
+            return true
+        }
+        return false
+    }
+
+    @objc private func transitionChanged() {
+        let index = transitionPopup.indexOfSelectedItem
+        guard Transition.allCases.indices.contains(index) else { return }
+        selectedTransition = Transition.allCases[index]
+    }
+
+    private func syncDeleteButton() {
+        let selectedDuration = (pendingDeleteEnd ?? 0) - (pendingDeleteStart ?? 0)
+        deleteButton?.isEnabled = selectedDuration >= 0.05
+    }
 
     // MARK: - Append
 
@@ -298,26 +410,142 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         panel.allowedContentTypes = [.mpeg4Movie, .quickTimeMovie]
         panel.title = "Select Video to Append"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        let alert = NSAlert()
-        alert.messageText = "Append Video"
-        alert.informativeText = "Choose a transition between the current clip and the appended video."
-        alert.addButton(withTitle: "No Transition")
-        alert.addButton(withTitle: "Fade to Black")
-        alert.addButton(withTitle: "Fade to White")
-        alert.addButton(withTitle: "Cancel")
-        let transition: Transition
-        switch alert.runModal() {
-        case .alertSecondButtonReturn: transition = .fadeBlack
-        case .alertThirdButtonReturn: transition = .fadeWhite
-        case .alertFirstButtonReturn: transition = .none
-        default: return
-        }
-        clips.append(AVURLAsset(url: url))
-        transitions.append(transition)
+        let asset = AVURLAsset(url: url)
+        segments.append(ClipSegment(asset: asset, range: CMTimeRange(start: .zero, duration: asset.duration)))
+        joinTransitions.append(selectedTransition)
+        joinKinds.append(.append)
         trimEnd = .greatestFiniteMagnitude // rebuild clamps to the new full duration
         rebuildPlayer()
         trimEnd = duration
         seek(trimStart)
+        syncTimeline()
+    }
+
+    @objc private func commitPendingDelete() {
+        guard let pendingDeleteStart, let pendingDeleteEnd else { return }
+        deleteRange(start: pendingDeleteStart, end: pendingDeleteEnd)
+    }
+
+    private func deleteRange(start: Double, end: Double) {
+        let deleteStart = max(0, min(start, duration))
+        let deleteEnd = max(0, min(end, duration))
+        let deleteDuration = deleteEnd - deleteStart
+        guard deleteDuration >= 0.05, duration - deleteDuration >= 0.05 else { return }
+        pushUndoSnapshot()
+        let oldJoinTransitions = joinTransitions
+        let oldJoinKinds = joinKinds
+        let oldTrimStart = trimStart
+        let oldTrimEnd = trimEnd
+
+        struct Piece {
+            var segment: ClipSegment
+            var index: Int
+            var oldStart: Double
+            var oldEnd: Double
+            var segmentOldStart: Double
+            var segmentOldEnd: Double
+        }
+
+        var pieces: [Piece] = []
+        var cursor = 0.0
+        for (index, segment) in segments.enumerated() {
+            let segmentStart = cursor
+            let segmentEnd = cursor + segment.durationSeconds
+            let leftEnd = min(segmentEnd, deleteStart)
+            if leftEnd > segmentStart {
+                let keptDuration = leftEnd - segmentStart
+                pieces.append(Piece(
+                    segment: ClipSegment(asset: segment.asset, range: CMTimeRange(start: segment.range.start, duration: cmTime(keptDuration))),
+                    index: index,
+                    oldStart: segmentStart,
+                    oldEnd: leftEnd,
+                    segmentOldStart: segmentStart,
+                    segmentOldEnd: segmentEnd
+                ))
+            }
+            let rightStart = max(segmentStart, deleteEnd)
+            if rightStart < segmentEnd {
+                let sourceOffset = rightStart - segmentStart
+                let keptDuration = segmentEnd - rightStart
+                pieces.append(Piece(
+                    segment: ClipSegment(
+                        asset: segment.asset,
+                        range: CMTimeRange(start: CMTimeAdd(segment.range.start, cmTime(sourceOffset)), duration: cmTime(keptDuration))
+                    ),
+                    index: index,
+                    oldStart: rightStart,
+                    oldEnd: segmentEnd,
+                    segmentOldStart: segmentStart,
+                    segmentOldEnd: segmentEnd
+                ))
+            }
+            cursor = segmentEnd
+        }
+
+        segments = pieces.map(\.segment)
+        joinTransitions = []
+        joinKinds = []
+        for index in 1..<pieces.count {
+            let previous = pieces[index - 1]
+            let current = pieces[index]
+            if current.oldStart - previous.oldEnd > 0.001 {
+                joinTransitions.append(selectedTransition)
+                joinKinds.append(.delete)
+            } else if previous.index + 1 == current.index,
+                      abs(previous.oldEnd - previous.segmentOldEnd) <= 0.001,
+                      abs(current.oldStart - current.segmentOldStart) <= 0.001,
+                      oldJoinTransitions.indices.contains(previous.index) {
+                joinTransitions.append(oldJoinTransitions[previous.index])
+                joinKinds.append(oldJoinKinds[previous.index])
+            } else {
+                joinTransitions.append(.none)
+                joinKinds.append(.append)
+            }
+        }
+
+        func mappedTimeAfterDelete(_ time: Double) -> Double {
+            if time <= deleteStart { return time }
+            if time >= deleteEnd { return time - deleteDuration }
+            return deleteStart
+        }
+
+        trimStart = mappedTimeAfterDelete(oldTrimStart)
+        trimEnd = max(trimStart + 0.05, mappedTimeAfterDelete(oldTrimEnd))
+        rebuildPlayer()
+        trimEnd = min(trimEnd, duration)
+        seek(min(deleteStart, duration))
+        pendingDeleteStart = nil
+        pendingDeleteEnd = nil
+        timeline.clearPendingDeleteSelection()
+        syncDeleteButton()
+        syncTimeline()
+    }
+
+    private func pushUndoSnapshot() {
+        undoStack.append(EditorSnapshot(
+            segments: segments,
+            joinTransitions: joinTransitions,
+            joinKinds: joinKinds,
+            trimStart: trimStart,
+            trimEnd: trimEnd,
+            seekPosition: player?.currentTime().seconds ?? trimStart
+        ))
+    }
+
+    private func undoLastEdit() {
+        guard let snapshot = undoStack.popLast() else { return }
+        segments = snapshot.segments
+        joinTransitions = snapshot.joinTransitions
+        joinKinds = snapshot.joinKinds
+        trimStart = snapshot.trimStart
+        trimEnd = snapshot.trimEnd
+        pendingDeleteStart = nil
+        pendingDeleteEnd = nil
+        timeline.clearPendingDeleteSelection()
+        rebuildPlayer()
+        trimEnd = min(trimEnd, duration)
+        seek(min(snapshot.seekPosition, duration))
+        syncDeleteButton()
         syncTimeline()
     }
 
@@ -339,7 +567,9 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
     }
 
     private func canSaveOriginalWithoutExport() -> Bool {
-        guard clips.count == 1, transitions.isEmpty else { return false }
+        guard segments.count == 1, joinTransitions.isEmpty else { return false }
+        guard abs(segments[0].range.start.seconds) <= 1.0 / 600.0,
+              abs(segments[0].range.duration.seconds - duration) <= 1.0 / 600.0 else { return false }
         let tolerance = 1.0 / 600.0
         return trimStart <= tolerance && abs(trimEnd - duration) <= tolerance
     }
@@ -372,24 +602,35 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
 
     // MARK: - Composition
 
-    private struct Built { let composition: AVMutableComposition; let videoComposition: AVMutableVideoComposition? }
+    private struct Built {
+        let composition: AVMutableComposition
+        let videoComposition: AVMutableVideoComposition?
+        let audioMix: AVMutableAudioMix?
+    }
+
+    private struct AudioSegment {
+        let track: AVMutableCompositionTrack
+        let start: CMTime
+        let end: CMTime
+    }
+
+    private func cmTime(_ seconds: Double) -> CMTime {
+        CMTime(seconds: seconds, preferredTimescale: 600)
+    }
 
     private func buildComposition() -> Built {
         let comp = AVMutableComposition()
         guard let vTrack = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
-            return Built(composition: comp, videoComposition: nil)
+            return Built(composition: comp, videoComposition: nil, audioMix: nil)
         }
-        // One composition audio track per source audio track so system audio
-        // and microphone (separate tracks) both play and mix.
-        var aTracks: [AVMutableCompositionTrack] = []
+        var audioSegments: [AudioSegment] = []
         var cursor = CMTime.zero
         var boundaries: [CMTime] = []
         var segments: [(start: CMTime, size: CGSize)] = []
         var renderSize = CGSize(width: 1280, height: 720)
-        for (index, asset) in clips.enumerated() {
-            let range = CMTimeRange(start: .zero, duration: asset.duration)
-            if let v = asset.tracks(withMediaType: .video).first {
-                try? vTrack.insertTimeRange(range, of: v, at: cursor)
+        for (index, segment) in self.segments.enumerated() {
+            if let v = segment.asset.tracks(withMediaType: .video).first {
+                try? vTrack.insertTimeRange(segment.range, of: v, at: cursor)
                 // Account for the track's preferred transform so rotated clips
                 // report their displayed size.
                 let s = v.naturalSize.applying(v.preferredTransform)
@@ -399,25 +640,22 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
                 renderSize.width = max(renderSize.width, size.width)
                 renderSize.height = max(renderSize.height, size.height)
             }
-            for (audioIndex, a) in asset.tracks(withMediaType: .audio).enumerated() {
-                if audioIndex >= aTracks.count,
-                   let t = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-                    aTracks.append(t)
-                }
-                if audioIndex < aTracks.count {
-                    try? aTracks[audioIndex].insertTimeRange(range, of: a, at: cursor)
+            for a in segment.asset.tracks(withMediaType: .audio) {
+                if let track = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+                    try? track.insertTimeRange(segment.range, of: a, at: cursor)
+                    audioSegments.append(AudioSegment(track: track, start: cursor, end: CMTimeAdd(cursor, segment.duration)))
                 }
             }
-            cursor = CMTimeAdd(cursor, asset.duration)
-            if index < clips.count - 1 { boundaries.append(cursor) }
+            cursor = CMTimeAdd(cursor, segment.duration)
+            if index < self.segments.count - 1 { boundaries.append(cursor) }
         }
 
         // Nothing to scale and no fades: play the single clip as-is.
-        let fades = zip(boundaries, transitions).filter { $0.1 != .none }
+        let fades = zip(boundaries, joinTransitions).filter { $0.1 != .none }
         let needsScaling = segments.contains { abs($0.size.width - renderSize.width) > 1 || abs($0.size.height - renderSize.height) > 1 }
-        guard !fades.isEmpty || needsScaling else { return Built(composition: comp, videoComposition: nil) }
+        guard !fades.isEmpty || needsScaling else { return Built(composition: comp, videoComposition: nil, audioMix: nil) }
 
-        let fadeDur = CMTime(seconds: 0.75, preferredTimescale: 600)
+        let fadeDur = CMTime(seconds: 1, preferredTimescale: 600)
         let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: vTrack)
         // Aspect-fill each clip into the (largest) render size, centered, so
         // smaller segments magnify to fill instead of leaving blank borders.
@@ -428,11 +666,22 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
             let transform = CGAffineTransform(scaleX: scale, y: scale).concatenating(CGAffineTransform(translationX: tx, y: ty))
             layer.setTransform(transform, at: seg.start)
         }
-        for (time, kind) in fades where kind != .none {
-            let outRange = CMTimeRange(start: CMTimeSubtract(time, fadeDur), duration: fadeDur)
-            let inRange = CMTimeRange(start: time, duration: fadeDur)
-            layer.setOpacityRamp(fromStartOpacity: 1, toEndOpacity: 0, timeRange: outRange)
-            layer.setOpacityRamp(fromStartOpacity: 0, toEndOpacity: 1, timeRange: inRange)
+        // Opacity ramps for all fades live on a single layer instruction, so
+        // adjacent fades must not overlap or `setOpacityRamp` throws. Clamp each
+        // fade against its neighbouring faded boundaries (splitting the gap so
+        // ramps meet at the midpoint) and against the composition edges.
+        for (index, entry) in fades.enumerated() {
+            let time = entry.0
+            let previousBoundary = index > 0 ? fades[index - 1].0 : nil
+            let nextBoundary = index < fades.count - 1 ? fades[index + 1].0 : nil
+            let ranges = transitionRanges(at: time, fadeDuration: fadeDur, compositionDuration: comp.duration,
+                                          previousBoundary: previousBoundary, nextBoundary: nextBoundary)
+            if let outRange = ranges.out {
+                layer.setOpacityRamp(fromStartOpacity: 1, toEndOpacity: 0, timeRange: outRange)
+            }
+            if let inRange = ranges.in {
+                layer.setOpacityRamp(fromStartOpacity: 0, toEndOpacity: 1, timeRange: inRange)
+            }
         }
         let instruction = AVMutableVideoCompositionInstruction()
         instruction.timeRange = CMTimeRange(start: .zero, duration: comp.duration)
@@ -447,7 +696,80 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         vc.instructions = [instruction]
         vc.renderSize = renderSize
         vc.frameDuration = CMTime(value: 1, timescale: 30)
-        return Built(composition: comp, videoComposition: vc)
+        let audioMix = buildAudioMix(for: audioSegments, fades: fades, fadeDuration: fadeDur)
+        return Built(composition: comp, videoComposition: vc, audioMix: audioMix)
+    }
+
+    private func transitionRanges(at time: CMTime, fadeDuration: CMTime, compositionDuration: CMTime,
+                                  previousBoundary: CMTime? = nil, nextBoundary: CMTime? = nil) -> (out: CMTimeRange?, in: CMTimeRange?) {
+        let timescale = fadeDuration.timescale
+        // Available space before this boundary: to the composition start, or to
+        // the midpoint with the previous faded boundary so the two ramps meet
+        // instead of overlapping.
+        let spaceBefore: Double
+        if let previousBoundary {
+            spaceBefore = max(0, (time.seconds - previousBoundary.seconds) / 2)
+        } else {
+            spaceBefore = max(0, time.seconds)
+        }
+        let spaceAfter: Double
+        if let nextBoundary {
+            spaceAfter = max(0, (nextBoundary.seconds - time.seconds) / 2)
+        } else {
+            spaceAfter = max(0, compositionDuration.seconds - time.seconds)
+        }
+        let outSeconds = min(fadeDuration.seconds, spaceBefore)
+        let inSeconds = min(fadeDuration.seconds, spaceAfter)
+        let outDuration = CMTime(seconds: outSeconds, preferredTimescale: timescale)
+        let inDuration = CMTime(seconds: inSeconds, preferredTimescale: timescale)
+        let outRange = outSeconds > 0 ? CMTimeRange(start: CMTimeSubtract(time, outDuration), duration: outDuration) : nil
+        let inRange = inSeconds > 0 ? CMTimeRange(start: time, duration: inDuration) : nil
+        return (outRange, inRange)
+    }
+
+    private func buildAudioMix(for audioSegments: [AudioSegment], fades: [(CMTime, Transition)], fadeDuration: CMTime) -> AVMutableAudioMix? {
+        guard !audioSegments.isEmpty, !fades.isEmpty else { return nil }
+        let parameters = audioSegments.map { audioSegment in
+            let parameter = AVMutableAudioMixInputParameters(track: audioSegment.track)
+            parameter.setVolume(1, at: .zero)
+            for (time, _) in fades {
+                if sameTime(audioSegment.end, time) {
+                    let duration = min(fadeDuration.seconds, max(0, CMTimeSubtract(audioSegment.end, audioSegment.start).seconds))
+                    if duration > 0 {
+                        let fade = CMTime(seconds: duration, preferredTimescale: fadeDuration.timescale)
+                        let fadeStart = CMTimeSubtract(audioSegment.end, fade)
+                        parameter.setVolume(1, at: fadeStart)
+                        parameter.setVolumeRamp(
+                            fromStartVolume: 1,
+                            toEndVolume: 0,
+                            timeRange: CMTimeRange(start: fadeStart, duration: fade)
+                        )
+                        parameter.setVolume(0, at: audioSegment.end)
+                    }
+                }
+                if sameTime(audioSegment.start, time) {
+                    let duration = min(fadeDuration.seconds, max(0, CMTimeSubtract(audioSegment.end, audioSegment.start).seconds))
+                    if duration > 0 {
+                        let fade = CMTime(seconds: duration, preferredTimescale: fadeDuration.timescale)
+                        parameter.setVolume(0, at: audioSegment.start)
+                        parameter.setVolumeRamp(
+                            fromStartVolume: 0,
+                            toEndVolume: 1,
+                            timeRange: CMTimeRange(start: audioSegment.start, duration: fade)
+                        )
+                        parameter.setVolume(1, at: CMTimeAdd(audioSegment.start, fade))
+                    }
+                }
+            }
+            return parameter
+        }
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = parameters
+        return mix
+    }
+
+    private func sameTime(_ lhs: CMTime, _ rhs: CMTime) -> Bool {
+        abs(lhs.seconds - rhs.seconds) <= 1.0 / 600.0
     }
 
     private func export(completion: @escaping (URL?) -> Void) {
@@ -464,6 +786,7 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         session.outputFileType = .mp4
         session.timeRange = range
         session.videoComposition = built.videoComposition
+        session.audioMix = built.audioMix
         nonisolated(unsafe) let unsafeSession = session
         nonisolated(unsafe) let cb = completion
         session.exportAsynchronously {
