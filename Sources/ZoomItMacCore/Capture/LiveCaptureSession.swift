@@ -1,6 +1,6 @@
 import CoreImage
 import CoreMedia
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
 
 /// A CGImage that is safe to hand across concurrency domains. CGImage is an
 /// immutable, thread-safe Core Foundation type, but it is not formally Sendable,

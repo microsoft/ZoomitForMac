@@ -1,6 +1,6 @@
 import AVFoundation
 import AppKit
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
 
 /// Wraps a CMSampleBuffer so it can be handed from capture callbacks to the
 /// writer queue. CMSampleBuffer is immutable once delivered and the writer
