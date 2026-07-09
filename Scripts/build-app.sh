@@ -37,8 +37,33 @@ APP_PATH="$ROOT_DIR/.build/$APP_NAME"
 
 cd "$ROOT_DIR"
 
-swift build -c "$CONFIGURATION"
-BIN_DIR="$(swift build -c "$CONFIGURATION" --show-bin-path)"
+# Architectures. Release builds ship a Universal binary (Apple Silicon + Intel)
+# so the download runs natively on both; debug builds stay native for speed.
+# Override with ZOOMIT_ARCHS (space-separated, e.g. "arm64"); set it to empty to
+# use the toolchain default. A modern macOS agent cross-compiles the x86_64 slice
+# from Apple Silicon, so no second build machine is needed.
+if [[ -n "${ZOOMIT_ARCHS+set}" ]]; then
+    archs=(${=ZOOMIT_ARCHS})
+elif [[ "$CONFIGURATION" == "release" ]]; then
+    archs=(arm64 x86_64)
+else
+    archs=()
+fi
+arch_flags=()
+for a in $archs; do arch_flags+=(--arch $a); done
+
+# SwiftPM's multi-arch (Universal) build routes through Xcode's xcbuild, which is
+# only present with a full Xcode install — not the standalone Command Line Tools.
+# CI agents have full Xcode; a contributor on CLT-only would otherwise hard-fail,
+# so fall back to a native build with a warning.
+if (( ${#arch_flags} > 0 )) && ! xcodebuild -version >/dev/null 2>&1; then
+    echo "warning: Universal build needs full Xcode (xcodebuild); building native only." >&2
+    archs=()
+    arch_flags=()
+fi
+
+swift build -c "$CONFIGURATION" $arch_flags
+BIN_DIR="$(swift build -c "$CONFIGURATION" $arch_flags --show-bin-path)"
 
 rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
@@ -133,3 +158,4 @@ echo "$APP_PATH"
 echo "  bundle id:    $BUNDLE_ID" >&2
 echo "  display name: $DISPLAY_NAME" >&2
 echo "  signed with:  $SIGN_DESC" >&2
+echo "  architectures: $(lipo -archs "$APP_PATH/Contents/MacOS/ZoomIt" 2>/dev/null || echo unknown)" >&2
