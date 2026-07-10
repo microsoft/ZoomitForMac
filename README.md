@@ -97,7 +97,36 @@ Testers should run the bundled app, not `swift run`. Build a release app bundle:
 zsh Scripts/build-app.sh release
 ```
 
-This produces `.build/ZoomIt.app` with the app icon, the bundled resources, and an `Info.plist` declaring the microphone and camera usage descriptions. `release` builds are **Universal** (Apple Silicon + Intel) by default; `debug` builds are native to the build machine for speed. Override the architectures with `ZOOMIT_ARCHS` (e.g. `ZOOMIT_ARCHS=arm64`). A Universal build routes through Xcode's build system, so it requires a **full Xcode** install — with only the Command Line Tools the script warns and falls back to a native build. The build summary prints the resulting architectures.
+By default this produces `.build/ZoomIt (Dev).app` with the app icon, bundled resources, and an `Info.plist` declaring the microphone and camera usage descriptions. `release` builds are **Universal** (Apple Silicon + Intel) by default; `debug` builds are native to the build machine for speed. Override the architectures with `ZOOMIT_ARCHS` (e.g. `ZOOMIT_ARCHS=arm64`). A Universal build routes through Xcode's build system, so it requires a **full Xcode** install — with only the Command Line Tools the script warns and falls back to a native build. The build summary prints the resulting architectures.
+
+### Create and install a local development DMG
+
+Build the Universal development app, stage it with an Applications shortcut, and create a compressed disk image using macOS's built-in `hdiutil`:
+
+```sh
+zsh Scripts/build-app.sh release
+
+STAGE="$(mktemp -d)"
+ditto ".build/ZoomIt (Dev).app" "$STAGE/ZoomIt (Dev).app"
+ln -s /Applications "$STAGE/Applications"
+hdiutil create \
+  -volname "ZoomIt Dev" \
+  -srcfolder "$STAGE" \
+  -ov -format UDZO \
+  ".build/ZoomIt-Dev.dmg"
+rm -rf "$STAGE"
+
+hdiutil verify ".build/ZoomIt-Dev.dmg"
+open ".build/ZoomIt-Dev.dmg"
+```
+
+Drag **ZoomIt (Dev)** to the Applications shortcut in the mounted image, then launch the installed copy:
+
+```sh
+open "/Applications/ZoomIt (Dev).app"
+```
+
+A `.dmg` is a disk image, not an executable; use `open path/to/file.dmg` rather than invoking the path directly. Do **not** override a local ad-hoc build to use `com.sysinternals.zoomitmac` or the `ZoomIt.app` name. That identity is reserved for the officially Developer ID-signed release; an ad-hoc app using it conflicts with the official app's macOS privacy (TCC) grants even when System Settings shows Screen Recording as enabled.
 
 ### Bundle identity: dev vs. official
 
@@ -132,18 +161,18 @@ Override any field explicitly with `ZOOMIT_SIGN_IDENTITY`, `ZOOMIT_BUNDLE_ID`, a
 
   A notarized app opens with a normal double-click and keeps its Screen Recording permission across updates.
 
-- **Quick internal testing (unsigned/ad-hoc):** if you skip notarization, Gatekeeper blocks the app on other Macs. Testers can clear the quarantine flag after copying it to `/Applications`:
+- **Quick internal testing (unsigned/ad-hoc):** use the development identity and `ZoomIt-Dev.dmg` procedure above. If another Mac downloads the unnotarized DMG, Gatekeeper may block it. After copying the app to `/Applications`, testers can clear the quarantine flag:
 
   ```sh
-  xattr -dr com.apple.quarantine /Applications/ZoomIt.app
-  open /Applications/ZoomIt.app
+  xattr -dr com.apple.quarantine "/Applications/ZoomIt (Dev).app"
+  open "/Applications/ZoomIt (Dev).app"
   ```
 
   Note that rebuilding an ad-hoc/unsigned app can reset its Screen Recording permission, so testers may need to re-grant it after an update.
 
 ### First run
 
-1. Move `ZoomIt.app` to `/Applications` and open it. It runs as a menu-bar item (no Dock icon).
-2. macOS prompts for **Screen Recording** the first time a capture feature is used; grant it in System Settings ▸ Privacy & Security ▸ Screen Recording, then relaunch ZoomIt.
+1. Move `ZoomIt (Dev).app` (local testing) or `ZoomIt.app` (official release) to `/Applications` and open it. It runs as a menu-bar item (no Dock icon).
+2. macOS prompts for **Screen Recording** the first time a capture feature is used; enable the matching **ZoomIt (Dev)** or **ZoomIt** row in System Settings ▸ Privacy & Security ▸ Screen Recording, then relaunch that same app.
 3. **Microphone** and **Camera** are only requested when those recording options are enabled.
 4. Use the menu-bar icon or the default hotkeys above to drive the app, and the Settings dialog to customize shortcuts and behavior.
