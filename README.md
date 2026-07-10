@@ -176,3 +176,51 @@ Override any field explicitly with `ZOOMIT_SIGN_IDENTITY`, `ZOOMIT_BUNDLE_ID`, a
 2. macOS prompts for **Screen Recording** the first time a capture feature is used; enable the matching **ZoomIt (Dev)** or **ZoomIt** row in System Settings ▸ Privacy & Security ▸ Screen Recording, then relaunch that same app.
 3. **Microphone** and **Camera** are only requested when those recording options are enabled.
 4. Use the menu-bar icon or the default hotkeys above to drive the app, and the Settings dialog to customize shortcuts and behavior.
+
+### Clear stale Screen Recording permissions
+
+macOS privacy permissions (TCC) are tied to both an app's bundle identifier and its code-signing requirement. If an ad-hoc build previously used the official `com.sysinternals.zoomitmac` identifier, System Settings can show **ZoomIt** as enabled while macOS rejects the currently installed Developer ID-signed app. Typical symptoms are:
+
+- `Control+1` repeatedly opens Screen Recording settings even though ZoomIt is enabled.
+- Closing the permission dialog and pressing `Control+1` again does nothing.
+- A newly installed, correctly signed build still cannot capture the screen.
+
+Reset only the Screen Recording record for the identity you are running. This removes the stale grant; it does not uninstall the app or clear ZoomIt settings.
+
+For the **officially signed** `/Applications/ZoomIt.app`:
+
+```sh
+pkill -f "/Applications/ZoomIt.app/Contents/MacOS/ZoomIt" 2>/dev/null || true
+tccutil reset ScreenCapture com.sysinternals.zoomitmac
+
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+"$LSREGISTER" -f "/Applications/ZoomIt.app"
+open "/Applications/ZoomIt.app"
+```
+
+For the local **development** `/Applications/ZoomIt (Dev).app`:
+
+```sh
+pkill -f "/Applications/ZoomIt (Dev).app/Contents/MacOS/ZoomIt" 2>/dev/null || true
+tccutil reset ScreenCapture com.sysinternals.zoomitmac.dev
+
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+"$LSREGISTER" -f "/Applications/ZoomIt (Dev).app"
+open "/Applications/ZoomIt (Dev).app"
+```
+
+After relaunching:
+
+1. Press `Control+1` once to request Screen Recording access.
+2. Enable the matching **ZoomIt** or **ZoomIt (Dev)** row in System Settings.
+3. Use macOS's **Quit & Reopen** button, or quit and reopen that same app manually.
+4. Press `Control+1` again.
+
+Static zoom requires **Screen Recording** only. Microphone and Camera permissions are unrelated unless their optional recording features are enabled. If the problem immediately returns after the reset, verify that the installed app has the expected identity:
+
+```sh
+codesign -dv --verbose=2 "/Applications/ZoomIt.app" 2>&1 \
+  | grep -E "Identifier=|Authority=Developer ID Application|TeamIdentifier="
+```
+
+The official app should report identifier `com.sysinternals.zoomitmac` and a Developer ID authority. Never distribute or install an ad-hoc-signed app under that official identifier; local builds must remain `ZoomIt (Dev).app` with identifier `com.sysinternals.zoomitmac.dev`.
