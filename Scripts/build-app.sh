@@ -75,7 +75,20 @@ cp "$BIN_DIR/ZoomIt" "$APP_PATH/Contents/MacOS/ZoomIt"
 # with "unsealed contents present in the bundle root"). Flattening the bundle's
 # resources into Contents/Resources lets the app resolve them via Bundle.main
 # (see AppIcon.loadImage) while keeping the bundle codesign-valid.
-cp -R "$BIN_DIR/ZoomItMac_ZoomItMacCore.bundle/." "$APP_PATH/Contents/Resources/"
+#
+# The bundle's internal layout differs by build system: a native `swift build`
+# (llbuild) emits a FLAT bundle with resources at its root, while a Universal
+# `--arch` build (xcbuild) emits a STRUCTURED bundle with resources under
+# Contents/Resources. Copy from whichever layout is present so the icons land
+# flat in the app's Contents/Resources in both cases (otherwise Bundle.main
+# can't find them, the code falls through to Bundle.module, and it fatal-errors
+# on launch).
+RESOURCE_BUNDLE="$BIN_DIR/ZoomItMac_ZoomItMacCore.bundle"
+if [[ -d "$RESOURCE_BUNDLE/Contents/Resources" ]]; then
+    cp -R "$RESOURCE_BUNDLE/Contents/Resources/." "$APP_PATH/Contents/Resources/"
+else
+    cp -R "$RESOURCE_BUNDLE/." "$APP_PATH/Contents/Resources/"
+fi
 
 if [[ -f "$ICON_SOURCE" ]] && command -v sips >/dev/null && command -v iconutil >/dev/null; then
     ICONSET="$(mktemp -d)/ZoomIt.iconset"
