@@ -50,6 +50,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private weak var microphonePopup: NSPopUpButton?
     private weak var noiseCancellationCheckbox: NSButton?
 
+    // Snip tab controls.
+    private weak var snipSaveDirectoryField: NSTextField?
+    private weak var snipSaveDirectoryBrowseButton: NSButton?
+
     // DemoType tab controls.
     private weak var demoTypeFileField: NSTextField?
 
@@ -1052,7 +1056,70 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.snipOcrHotKeyButton = snipOcrHotKeyButton
         let snipOcrHotKeyRow = makeRow([makeLabel("OCR region to text:"), snipOcrHotKeyButton])
 
-        return makeColumn([help, snipHotKeyRow, snipOcrHotKeyRow])
+        let copyOnSaveCheck = NSButton(
+            checkboxWithTitle: "Also copy to clipboard when saving to a file",
+            target: self,
+            action: #selector(copySnipToClipboardOnSaveChanged(_:))
+        )
+        copyOnSaveCheck.state = settings.copySnipToClipboardOnSave ? .on : .off
+
+        let saveToDirectoryCheck = NSButton(
+            checkboxWithTitle: "Save to a folder instead of asking each time",
+            target: self,
+            action: #selector(saveSnipToDirectoryChanged(_:))
+        )
+        saveToDirectoryCheck.state = settings.saveSnipToDirectory ? .on : .off
+
+        let directoryField = NSTextField(labelWithString: snipSaveDirectoryDisplayPath())
+        directoryField.translatesAutoresizingMaskIntoConstraints = false
+        directoryField.lineBreakMode = .byTruncatingMiddle
+        directoryField.widthAnchor.constraint(equalToConstant: 380).isActive = true
+        snipSaveDirectoryField = directoryField
+        let directoryBrowse = NSButton(title: "Browse…", target: self, action: #selector(chooseSnipSaveDirectory(_:)))
+        directoryBrowse.bezelStyle = .rounded
+        snipSaveDirectoryBrowseButton = directoryBrowse
+        let directoryRow = makeIndentedColumn([makeRow([makeLabel("Folder:"), directoryField, directoryBrowse])])
+
+        updateSnipSaveDirectoryControlsEnabled()
+
+        return makeColumn([help, snipHotKeyRow, snipOcrHotKeyRow, copyOnSaveCheck, saveToDirectoryCheck, directoryRow])
+    }
+
+    private func snipSaveDirectoryDisplayPath() -> String {
+        if settings.snipSaveDirectory.trimmingCharacters(in: .whitespaces).isEmpty {
+            return ImageExporter.defaultSaveDirectory().path
+        }
+        return settings.snipSaveDirectory
+    }
+
+    private func updateSnipSaveDirectoryControlsEnabled() {
+        snipSaveDirectoryField?.isEnabled = settings.saveSnipToDirectory
+        snipSaveDirectoryBrowseButton?.isEnabled = settings.saveSnipToDirectory
+    }
+
+    @objc private func copySnipToClipboardOnSaveChanged(_ sender: NSButton) {
+        settings.copySnipToClipboardOnSave = (sender.state == .on)
+        persist()
+    }
+
+    @objc private func saveSnipToDirectoryChanged(_ sender: NSButton) {
+        settings.saveSnipToDirectory = (sender.state == .on)
+        updateSnipSaveDirectoryControlsEnabled()
+        persist()
+    }
+
+    @objc private func chooseSnipSaveDirectory(_ sender: NSButton) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        panel.title = "ZoomIt: Choose Snip Folder"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        settings.snipSaveDirectory = url.path
+        snipSaveDirectoryField?.stringValue = url.path
+        persist()
     }
 
     // MARK: - Record tab

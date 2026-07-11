@@ -187,6 +187,7 @@ final class SnipController {
     private let captureService: ScreenCaptureService
     private let displayManager: DisplayManager
     private let permissionService: PermissionService
+    private let settingsStore: SettingsStore
 
     private var window: NSWindow?
     private var capturedFrame: CapturedFrame?
@@ -197,11 +198,13 @@ final class SnipController {
     init(
         captureService: ScreenCaptureService,
         displayManager: DisplayManager,
-        permissionService: PermissionService
+        permissionService: PermissionService,
+        settingsStore: SettingsStore
     ) {
         self.captureService = captureService
         self.displayManager = displayManager
         self.permissionService = permissionService
+        self.settingsStore = settingsStore
     }
 
     /// Begins a region selection. `action` chooses what to do with the selected
@@ -297,7 +300,7 @@ final class SnipController {
 
         switch action {
         case .saveImage:
-            ImageExporter.presentSavePanel(for: cropped)
+            ImageExporter.saveImage(cropped, settings: settingsStore.load())
         case .copyImage:
             ImageExporter.copyToPasteboard(cropped)
         case .recognizeText:

@@ -304,8 +304,9 @@ final class PanoramaController {
         }
 
         if save {
-            onWillShowSaveDialog?()
-            ImageExporter.presentSavePanel(for: cgImage)
+            ImageExporter.saveImage(cgImage, settings: settingsStore.load()) { [weak self] in
+                self?.onWillShowSaveDialog?()
+            }
             return "Panorama ready to save"
         } else {
             ImageExporter.copyToPasteboard(cgImage)
