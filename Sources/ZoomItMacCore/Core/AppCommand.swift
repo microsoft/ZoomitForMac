@@ -15,6 +15,7 @@ enum AppCommand: Equatable {
     case undo
     case clear
     case snipRegion(save: Bool)
+    case snipPreviousRegion(save: Bool)
     case snipOcr
     case startPanorama(save: Bool)
     case toggleRecording(region: Bool)

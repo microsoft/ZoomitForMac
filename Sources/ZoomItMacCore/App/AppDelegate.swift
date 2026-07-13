@@ -120,6 +120,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(staticZoomItem)
         let liveZoomItem = NSMenuItem(title: "Live Zoom", action: #selector(AppController.activateLiveZoom), keyEquivalent: "")
         menu.addItem(liveZoomItem)
+        let previousRegionItem = NSMenuItem(title: "Capture Previous Region", action: #selector(AppController.capturePreviousRegion), keyEquivalent: "")
+        menu.addItem(previousRegionItem)
         let recordItem = NSMenuItem(title: "Record Screen", action: #selector(AppController.toggleRecording), keyEquivalent: "")
         menu.addItem(recordItem)
         let panoramaItem = NSMenuItem(title: "Panorama Capture", action: #selector(AppController.startPanorama), keyEquivalent: "")

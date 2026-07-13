@@ -75,7 +75,7 @@ final class ModeCoordinator {
             // Ignore activation and snip hotkeys while a region selection is on
             // screen so a second trigger can't stack overlays.
             switch command {
-            case .activateStaticZoom, .activateLiveZoom, .activateDrawWithoutZoom, .snipRegion, .zoomIn, .zoomOutOrExit:
+            case .activateStaticZoom, .activateLiveZoom, .activateDrawWithoutZoom, .snipRegion, .snipPreviousRegion, .zoomIn, .zoomOutOrExit:
                 return
             default:
                 break
@@ -115,6 +115,8 @@ final class ModeCoordinator {
             overlayController.requestRedraw()
         case .snipRegion(let save):
             startSnip(action: save ? .saveImage : .copyImage)
+        case .snipPreviousRegion(let save):
+            startSnip(action: save ? .saveImage : .copyImage, reusePreviousRegion: true)
         case .snipOcr:
             startSnip(action: .recognizeText)
         case .toggleRecording(let region):
@@ -402,18 +404,40 @@ final class ModeCoordinator {
     /// Starts a region snip. From idle it captures the screen; while zoomed it
     /// selects within the current viewport so ZoomIt's own overlay is reused
     /// rather than captured.
-    private func startSnip(action: SnipAction) {
+    private func startSnip(action: SnipAction, reusePreviousRegion: Bool = false) {
         guard !isSnipping else {
             NSSound.beep()
             return
         }
         switch mode {
         case .idle:
+            if reusePreviousRegion {
+                isSnipping = true
+                let started = snipController.capturePrevious(action: action) { [weak self] in
+                    self?.isSnipping = false
+                }
+                if !started {
+                    isSnipping = false
+                    NSSound.beep()
+                }
+                return
+            }
             isSnipping = true
             snipController.begin(action: action) { [weak self] in
                 self?.isSnipping = false
             }
         case .staticZoom, .liveZoom, .drawOnly, .typing:
+            if reusePreviousRegion {
+                isSnipping = true
+                let started = overlayController.capturePreviousRegionSnip(action: action) { [weak self] in
+                    self?.isSnipping = false
+                }
+                if !started {
+                    isSnipping = false
+                    NSSound.beep()
+                }
+                return
+            }
             isSnipping = true
             overlayController.beginRegionSnip(action: action) { [weak self] in
                 self?.isSnipping = false

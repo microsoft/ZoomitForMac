@@ -48,6 +48,10 @@ final class AppController: NSObject {
         modeCoordinator.handle(.startPanorama(save: false))
     }
 
+    @objc func capturePreviousRegion() {
+        modeCoordinator.handle(.snipPreviousRegion(save: false))
+    }
+
     @objc func toggleBreakTimer() {
         modeCoordinator.handle(.toggleBreakTimer)
     }

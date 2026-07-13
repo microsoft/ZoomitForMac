@@ -79,6 +79,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         case breakTimer
         case snip
         case snipOcr
+        case snipPrevious
         case record
         case demoType
         case panorama
@@ -89,6 +90,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private weak var breakHotKeyButton: NSButton?
     private weak var snipHotKeyButton: NSButton?
     private weak var snipOcrHotKeyButton: NSButton?
+    private weak var snipPreviousHotKeyButton: NSButton?
     private weak var recordHotKeyButton: NSButton?
     private weak var demoTypeHotKeyButton: NSButton?
     private weak var panoramaHotKeyButton: NSButton?
@@ -130,6 +132,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         breakHotKeyButton?.title = breakHotKeyDisplayString()
         snipHotKeyButton?.title = snipHotKeyDisplayString()
         snipOcrHotKeyButton?.title = snipOcrHotKeyDisplayString()
+        snipPreviousHotKeyButton?.title = snipPreviousHotKeyDisplayString()
         recordHotKeyButton?.title = recordHotKeyDisplayString()
         demoTypeHotKeyButton?.title = demoTypeHotKeyDisplayString()
         panoramaHotKeyButton?.title = panoramaHotKeyDisplayString()
@@ -472,6 +475,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         beginRecording(target: .snipOcr, sender: sender)
     }
 
+    @objc private func toggleSnipPreviousHotKeyRecording(_ sender: NSButton) {
+        beginRecording(target: .snipPrevious, sender: sender)
+    }
+
     @objc private func toggleRecordHotKeyRecording(_ sender: NSButton) {
         beginRecording(target: .record, sender: sender)
     }
@@ -564,6 +571,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
                 conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
+                conflictsWithSnipPrevious(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
@@ -576,17 +584,34 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
                 conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
                 conflictsWithSnip(code: newCode, modifiers: newModifiers) ||
+                conflictsWithSnipPrevious(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
             settings.snipOcrHotKeyCode = newCode
             settings.snipOcrHotKeyModifiers = newModifiers
+        case .snipPrevious:
+            if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
+                conflictsWithLive(code: newCode, modifiers: newModifiers) ||
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
+                conflictsWithSnip(code: newCode, modifiers: newModifiers) ||
+                conflictsWithSnipOcr(code: newCode, modifiers: newModifiers) ||
+                conflictsWithRecord(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) ||
+                conflictsWithPanorama(code: newCode, modifiers: newModifiers) {
+                NSSound.beep()
+                return nil
+            }
+            settings.snipPreviousHotKeyCode = newCode
+            settings.snipPreviousHotKeyModifiers = newModifiers
         case .record:
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
                 conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
+                conflictsWithSnipPrevious(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
@@ -600,6 +625,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
                 conflictsWithSnip(code: newCode, modifiers: newModifiers) ||
                 conflictsWithSnipOcr(code: newCode, modifiers: newModifiers) ||
+                conflictsWithSnipPrevious(code: newCode, modifiers: newModifiers) ||
                 conflictsWithRecord(code: newCode, modifiers: newModifiers) ||
                 conflictsWithPanorama(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
@@ -612,6 +638,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
                 conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
+                conflictsWithSnipPrevious(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
@@ -652,6 +679,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             code == settings.snipOcrHotKeyCode && modifiers == settings.snipOcrHotKeyModifiers
     }
 
+    private func conflictsWithSnipPrevious(code: Int, modifiers: UInt) -> Bool {
+        settings.snipPreviousHotKeyCode != 0 &&
+            code == settings.snipPreviousHotKeyCode && modifiers == settings.snipPreviousHotKeyModifiers
+    }
+
     private func conflictsWithRecord(code: Int, modifiers: UInt) -> Bool {
         code == settings.recordHotKeyCode && modifiers == settings.recordHotKeyModifiers
     }
@@ -677,6 +709,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         breakHotKeyButton?.title = breakHotKeyDisplayString()
         snipHotKeyButton?.title = snipHotKeyDisplayString()
         snipOcrHotKeyButton?.title = snipOcrHotKeyDisplayString()
+        snipPreviousHotKeyButton?.title = snipPreviousHotKeyDisplayString()
         recordHotKeyButton?.title = recordHotKeyDisplayString()
         demoTypeHotKeyButton?.title = demoTypeHotKeyDisplayString()
         panoramaHotKeyButton?.title = panoramaHotKeyDisplayString()
@@ -705,6 +738,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private func snipOcrHotKeyDisplayString() -> String {
         guard settings.snipOcrHotKeyCode != 0 else { return "None" }
         return Self.describe(keyCode: settings.snipOcrHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.snipOcrHotKeyModifiers))
+    }
+
+    private func snipPreviousHotKeyDisplayString() -> String {
+        guard settings.snipPreviousHotKeyCode != 0 else { return "None" }
+        return Self.describe(keyCode: settings.snipPreviousHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.snipPreviousHotKeyModifiers))
     }
 
     private func recordHotKeyDisplayString() -> String {
@@ -1037,6 +1075,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
             The OCR shortcut works the same way, but recognizes the text in the selected region and copies that text to the clipboard.
 
+            Capture Previous Region repeats the last successful region snip without showing the drag selector. Hold Shift with that shortcut to save to a file.
+
             Saved images are PNG files named with the current date and time.
             """,
             wraps: true
@@ -1055,6 +1095,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         snipOcrHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
         self.snipOcrHotKeyButton = snipOcrHotKeyButton
         let snipOcrHotKeyRow = makeRow([makeLabel("OCR region to text:"), snipOcrHotKeyButton])
+
+        let snipPreviousHotKeyButton = NSButton(title: snipPreviousHotKeyDisplayString(), target: self, action: #selector(toggleSnipPreviousHotKeyRecording(_:)))
+        snipPreviousHotKeyButton.bezelStyle = .rounded
+        snipPreviousHotKeyButton.setButtonType(.momentaryPushIn)
+        snipPreviousHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+        self.snipPreviousHotKeyButton = snipPreviousHotKeyButton
+        let snipPreviousHotKeyRow = makeRow([makeLabel("Capture previous region:"), snipPreviousHotKeyButton])
 
         let copyOnSaveCheck = NSButton(
             checkboxWithTitle: "Also copy to clipboard when saving to a file",
@@ -1082,7 +1129,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         updateSnipSaveDirectoryControlsEnabled()
 
-        return makeColumn([help, snipHotKeyRow, snipOcrHotKeyRow, copyOnSaveCheck, saveToDirectoryCheck, directoryRow])
+        return makeColumn([help, snipHotKeyRow, snipOcrHotKeyRow, copyOnSaveCheck, saveToDirectoryCheck, directoryRow, snipPreviousHotKeyRow])
     }
 
     private func snipSaveDirectoryDisplayPath() -> String {

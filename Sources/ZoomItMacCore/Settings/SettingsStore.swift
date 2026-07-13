@@ -36,6 +36,11 @@ struct AppSettings: Equatable {
     /// SnipOcrToggleKey behavior.
     var snipOcrHotKeyCode: Int
     var snipOcrHotKeyModifiers: UInt
+    /// Virtual key code and modifier-flag raw value for re-running the last
+    /// successful region snip without opening the selector UI. A key code of 0
+    /// disables the hotkey.
+    var snipPreviousHotKeyCode: Int
+    var snipPreviousHotKeyModifiers: UInt
     var recordHotKeyCode: Int
     var recordHotKeyModifiers: UInt
     /// Virtual key code and modifier-flag raw value for DemoType. A key code of
@@ -134,6 +139,10 @@ struct AppSettings: Equatable {
         // copies it to the clipboard, matching ZoomIt's Ctrl+Alt+6 default.
         snipOcrHotKeyCode: 22,
         snipOcrHotKeyModifiers: (1 << 18) | (1 << 19),
+        // Control+9 (kVK_ANSI_9 = 25) repeats the last region snip;
+        // Control+Shift+9 repeats it and saves to a file.
+        snipPreviousHotKeyCode: 25,
+        snipPreviousHotKeyModifiers: 1 << 18,
         // Control+5 (kVK_ANSI_5 = 23) records the screen;
         // Control+Shift+5 records a selected region.
         recordHotKeyCode: 23,
@@ -204,6 +213,8 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let snipHotKeyModifiers = "snipHotKeyModifiers"
         static let snipOcrHotKeyCode = "snipOcrHotKeyCode"
         static let snipOcrHotKeyModifiers = "snipOcrHotKeyModifiers"
+        static let snipPreviousHotKeyCode = "snipPreviousHotKeyCode"
+        static let snipPreviousHotKeyModifiers = "snipPreviousHotKeyModifiers"
         static let recordHotKeyCode = "recordHotKeyCode"
         static let recordHotKeyModifiers = "recordHotKeyModifiers"
         static let demoTypeHotKeyCode = "demoTypeHotKeyCode"
@@ -327,6 +338,14 @@ final class UserDefaultsSettingsStore: SettingsStore {
 
         if defaults.object(forKey: Key.snipOcrHotKeyModifiers) != nil {
             settings.snipOcrHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.snipOcrHotKeyModifiers))
+        }
+
+        if defaults.object(forKey: Key.snipPreviousHotKeyCode) != nil {
+            settings.snipPreviousHotKeyCode = defaults.integer(forKey: Key.snipPreviousHotKeyCode)
+        }
+
+        if defaults.object(forKey: Key.snipPreviousHotKeyModifiers) != nil {
+            settings.snipPreviousHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.snipPreviousHotKeyModifiers))
         }
 
         if defaults.object(forKey: Key.recordHotKeyCode) != nil {
@@ -488,6 +507,8 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(Int(bitPattern: settings.snipHotKeyModifiers), forKey: Key.snipHotKeyModifiers)
         defaults.set(settings.snipOcrHotKeyCode, forKey: Key.snipOcrHotKeyCode)
         defaults.set(Int(bitPattern: settings.snipOcrHotKeyModifiers), forKey: Key.snipOcrHotKeyModifiers)
+        defaults.set(settings.snipPreviousHotKeyCode, forKey: Key.snipPreviousHotKeyCode)
+        defaults.set(Int(bitPattern: settings.snipPreviousHotKeyModifiers), forKey: Key.snipPreviousHotKeyModifiers)
         defaults.set(settings.recordHotKeyCode, forKey: Key.recordHotKeyCode)
         defaults.set(Int(bitPattern: settings.recordHotKeyModifiers), forKey: Key.recordHotKeyModifiers)
         defaults.set(settings.demoTypeHotKeyCode, forKey: Key.demoTypeHotKeyCode)
