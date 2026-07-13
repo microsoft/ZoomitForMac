@@ -92,6 +92,16 @@ struct AppSettings: Equatable {
     var webcamSize: Int
     /// Border shape: 0 rectangle, 1 rounded rectangle, 2 rounded square, 3 circle.
     var webcamShape: Int
+    /// Whether a snipped/screenshot image is also copied to the clipboard when
+    /// it is saved to a file. On by default so a saved snip is always available
+    /// to paste.
+    var copySnipToClipboardOnSave: Bool
+    /// Whether saving a snip/screenshot writes directly to `snipSaveDirectory`
+    /// with an auto-generated name instead of presenting a Save dialog.
+    var saveSnipToDirectory: Bool
+    /// Directory used when `saveSnipToDirectory` is on. Empty means the user's
+    /// Documents folder.
+    var snipSaveDirectory: String
 
     /// Initial magnification levels offered on the Zoom settings tab, matching
     /// ZoomIt's g_ZoomLevels slider values.
@@ -161,7 +171,10 @@ struct AppSettings: Equatable {
         webcamDeviceID: "",
         webcamPosition: 3,
         webcamSize: 1,
-        webcamShape: 0
+        webcamShape: 0,
+        copySnipToClipboardOnSave: true,
+        saveSnipToDirectory: false,
+        snipSaveDirectory: ""
     )
 }
 
@@ -222,6 +235,9 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let webcamPosition = "webcamPosition"
         static let webcamSize = "webcamSize"
         static let webcamShape = "webcamShape"
+        static let copySnipToClipboardOnSave = "copySnipToClipboardOnSave"
+        static let saveSnipToDirectory = "saveSnipToDirectory"
+        static let snipSaveDirectory = "snipSaveDirectory"
     }
 
     private let defaults: UserDefaults
@@ -437,6 +453,18 @@ final class UserDefaultsSettingsStore: SettingsStore {
             settings.webcamShape = defaults.integer(forKey: Key.webcamShape)
         }
 
+        if defaults.object(forKey: Key.copySnipToClipboardOnSave) != nil {
+            settings.copySnipToClipboardOnSave = defaults.bool(forKey: Key.copySnipToClipboardOnSave)
+        }
+
+        if defaults.object(forKey: Key.saveSnipToDirectory) != nil {
+            settings.saveSnipToDirectory = defaults.bool(forKey: Key.saveSnipToDirectory)
+        }
+
+        if let snipSaveDirectory = defaults.string(forKey: Key.snipSaveDirectory) {
+            settings.snipSaveDirectory = snipSaveDirectory
+        }
+
         return settings
     }
 
@@ -491,5 +519,8 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(settings.webcamPosition, forKey: Key.webcamPosition)
         defaults.set(settings.webcamSize, forKey: Key.webcamSize)
         defaults.set(settings.webcamShape, forKey: Key.webcamShape)
+        defaults.set(settings.copySnipToClipboardOnSave, forKey: Key.copySnipToClipboardOnSave)
+        defaults.set(settings.saveSnipToDirectory, forKey: Key.saveSnipToDirectory)
+        defaults.set(settings.snipSaveDirectory, forKey: Key.snipSaveDirectory)
     }
 }
