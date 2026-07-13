@@ -56,10 +56,10 @@ The contributor build is named `ZoomIt (Dev).app` (bundle id `com.sysinternals.z
 | Snip region to clipboard             | `Control+6`        |
 | Snip region to file                  | `Control+Shift+6`  |
 | OCR region to clipboard              | `Control+Option+6` |
-| Capture previous region to clipboard | `Control+9`        |
-| Capture previous region to file      | `Control+Shift+9`  |
 | Panorama to clipboard                | `Control+8`        |
 | Panorama to file                     | `Control+Shift+8`  |
+| Capture previous region to clipboard | `Control+9`        |
+| Capture previous region to file      | `Control+Shift+9`  |
 
 All global hotkeys are configurable in Settings. While zoomed, use `Option+Up` and `Option+Down` to change zoom level, mouse wheel to zoom or resize tools depending on mode, `Command+S` / `Command+C` to save or copy the viewport, and `Esc` or right click to exit the active overlay mode.
 
