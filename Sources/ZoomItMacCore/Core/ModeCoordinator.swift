@@ -20,7 +20,8 @@ final class ModeCoordinator {
     private lazy var snipController = SnipController(
         captureService: captureService,
         displayManager: displayManager,
-        permissionService: permissionService
+        permissionService: permissionService,
+        settingsStore: settingsStore
     )
     private var isSnipping = false
     /// Drives screen recording (Control+5 / Control+Shift+5).

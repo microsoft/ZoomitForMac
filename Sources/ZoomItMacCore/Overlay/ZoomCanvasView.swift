@@ -785,8 +785,18 @@ final class ZoomCanvasView: NSView {
     }
 
     /// Presents a Save dialog above the overlay (whose `.screenSaver` level would
-    /// otherwise hide it) with the cursor visible, then restores both.
+    /// otherwise hide it) with the cursor visible, then restores both. Honors the
+    /// snip preferences: also copies to the clipboard when configured, and writes
+    /// directly to the configured directory instead of showing a dialog.
     private func presentSavePanelOverOverlay(_ image: CGImage) {
+        let settings = UserDefaultsSettingsStore().load()
+        if settings.copySnipToClipboardOnSave {
+            ImageExporter.copyToPasteboard(image)
+        }
+        if settings.saveSnipToDirectory {
+            ImageExporter.writeToDirectory(image, directoryPath: settings.snipSaveDirectory)
+            return
+        }
         let savedLevel = window?.level
         let wasCursorHidden = cursorHidden
         window?.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue - 1)
