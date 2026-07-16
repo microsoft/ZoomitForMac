@@ -724,7 +724,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func makeDrawTab() -> NSView {
         let help = makeLabel(
-            "Once zoomed, enter drawing mode by pressing the left mouse button; exit drawing mode by pressing the right mouse button. Undo with Command-Z and erase all drawing by pressing E.",
+            "Once zoomed, enter drawing mode by pressing the left mouse button; exit drawing mode by pressing the right mouse button. Undo with Command-Z or Ctrl+Z and erase all drawing by pressing E.",
             wraps: true
         )
 
