@@ -24,6 +24,7 @@ public enum SelfTestRunner {
         try testTypingAnnotations()
         try testAnnotationRenderingTouchesPixels()
         try testSettingsRoundTrip()
+        try testFirstLaunchFlag()
         try testDemoTypeSettingsRoundTrip()
         try testDemoTypeScriptCleaningAndTokens()
         try testDemoTypeScriptDecoding()
@@ -268,6 +269,37 @@ public enum SelfTestRunner {
         try expect(store.load() == settings, "Expected saved settings to round-trip through the store")
 
         defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    private static func testFirstLaunchFlag() throws {
+        let suiteName = "ZoomItMacSelfTest.FirstLaunch.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            throw SelfTestError.failure("Could not create test UserDefaults suite")
+        }
+        let store = UserDefaultsSettingsStore(defaults: defaults)
+
+        // A fresh store reports first launch so the app opens Settings (issue #21).
+        try expect(!store.hasCompletedFirstLaunch, "Expected fresh store to report first launch not completed")
+
+        store.markFirstLaunchCompleted()
+        try expect(store.hasCompletedFirstLaunch, "Expected first launch to be marked completed")
+
+        // The flag must persist so subsequent launches do not reopen Settings.
+        let reloaded = UserDefaultsSettingsStore(defaults: defaults)
+        try expect(reloaded.hasCompletedFirstLaunch, "Expected first-launch completion to persist across store instances")
+
+        defaults.removePersistentDomain(forName: suiteName)
+
+        // Migration: a user upgrading from a build without the flag but with prior
+        // ZoomIt preferences must be treated as returning, not a fresh install.
+        let legacySuite = "ZoomItMacSelfTest.FirstLaunchLegacy.\(UUID().uuidString)"
+        guard let legacyDefaults = UserDefaults(suiteName: legacySuite) else {
+            throw SelfTestError.failure("Could not create legacy test UserDefaults suite")
+        }
+        legacyDefaults.set(11281, forKey: "NSStatusItem Preferred Position com.sysinternals.ZoomIt.statusItem")
+        let legacyStore = UserDefaultsSettingsStore(defaults: legacyDefaults)
+        try expect(legacyStore.hasCompletedFirstLaunch, "Expected prior status-item position default to count as a completed first launch")
+        legacyDefaults.removePersistentDomain(forName: legacySuite)
     }
 
     private static func testDemoTypeSettingsRoundTrip() throws {

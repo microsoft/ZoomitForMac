@@ -134,18 +134,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         demoTypeHotKeyButton?.title = demoTypeHotKeyDisplayString()
         panoramaHotKeyButton?.title = panoramaHotKeyDisplayString()
         launchAtLoginCheckbox?.state = settings.launchAtLogin ? .on : .off
-        // Suspend the global hotkeys while the dialog is open so the user can
-        // record a new shortcut without it firing; they resume on close.
-        onSuspendHotkeys()
         NSApp.activate(ignoringOtherApps: true)
         window.center()
         window.makeKeyAndOrderFront(nil)
     }
 
     func windowWillClose(_ notification: Notification) {
-        // Cancel any in-progress recording and re-enable the global hotkeys.
+        // Cancel any in-progress recording (which resumes the global hotkeys if
+        // they were suspended for capture).
         finishRecording()
-        onResumeHotkeys()
     }
 
     // MARK: - Window construction
@@ -491,6 +488,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             return
         }
         recordingTarget = target
+        // Suspend the global hotkeys only while actively capturing a shortcut so
+        // the pressed keys are recorded instead of triggering their action. They
+        // resume as soon as recording finishes, so shortcuts like the Zoom toggle
+        // keep working while the Settings dialog is merely open (issue #22).
+        onSuspendHotkeys()
         sender.title = "Type shortcut… (Esc cancels)"
         hotKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self else { return event }
@@ -666,11 +668,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func finishRecording() {
+        // Resume the global hotkeys only if a capture was actually in progress,
+        // keeping the suspend/resume balanced no matter how recording ends
+        // (successful capture, Esc, toggling the button, or window close).
+        let wasRecording = recordingTarget != nil
         if let hotKeyMonitor {
             NSEvent.removeMonitor(hotKeyMonitor)
         }
         hotKeyMonitor = nil
         recordingTarget = nil
+        if wasRecording {
+            onResumeHotkeys()
+        }
         hotKeyButton?.title = zoomHotKeyDisplayString()
         drawHotKeyButton?.title = drawHotKeyDisplayString()
         liveHotKeyButton?.title = liveHotKeyDisplayString()

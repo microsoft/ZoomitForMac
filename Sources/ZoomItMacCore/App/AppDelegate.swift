@@ -76,6 +76,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.updateRecordingIndicator(recording)
         }
         hotkeyService.start()
+
+        // On a fresh install, open Settings so the user has a clear entry point
+        // instead of a silent menu-bar-only launch (issue #21). Upgrading users
+        // are detected as returning by hasCompletedFirstLaunch, so they don't get
+        // an unexpected pop-up. Persist the flag either way so later launches no
+        // longer depend on the legacy migration sentinel.
+        if !settingsStore.hasCompletedFirstLaunch {
+            appController?.showSettings()
+        }
+        settingsStore.markFirstLaunchCompleted()
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
@@ -103,7 +113,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makeStatusItem(controller: AppController) -> NSStatusItem {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.autosaveName = NSStatusItem.AutosaveName("com.sysinternals.ZoomIt.statusItem")
+        // Intentionally no autosaveName: persisting an absolute menu-bar slot makes
+        // AppKit re-assert that position on every relaunch/relayout, which fights
+        // menu-bar managers like Bartender and Ice (the icon snaps back out of their
+        // "shown" section). Letting the system place the item keeps ZoomIt compatible
+        // with those tools; users can still Command-drag it to reorder.
         // Use the Windows ZoomIt icon (document with a magnifying glass) rendered
         // as a black template image so it tints to match the menu bar, following
         // the macOS convention for menu-bar icons.
