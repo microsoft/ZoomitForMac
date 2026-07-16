@@ -224,3 +224,5 @@ codesign -dv --verbose=2 "/Applications/ZoomIt.app" 2>&1 \
 ```
 
 The official app should report identifier `com.sysinternals.zoomitmac` and a Developer ID authority. Never distribute or install an ad-hoc-signed app under that official identifier; local builds must remain `ZoomIt (Dev).app` with identifier `com.sysinternals.zoomitmac.dev`.
+
+ 
