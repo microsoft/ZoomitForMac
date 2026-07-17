@@ -282,6 +282,7 @@ final class SnipController {
             return true
         }
         guard let display = displayManager.activeDisplay() else {
+            NSSound.beep()
             finish()
             return true
         }
