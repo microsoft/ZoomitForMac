@@ -36,6 +36,10 @@ final class AppController: NSObject {
         modeCoordinator.handle(.activateStaticZoom)
     }
 
+    @objc func activateDrawWithoutZoom() {
+        modeCoordinator.handle(.activateDrawWithoutZoom)
+    }
+
     @objc func activateLiveZoom() {
         modeCoordinator.handle(.activateLiveZoom)
     }

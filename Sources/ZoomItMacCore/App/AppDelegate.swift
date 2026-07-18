@@ -116,22 +116,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
-        let staticZoomItem = NSMenuItem(title: "Static Zoom", action: #selector(AppController.activateStaticZoom), keyEquivalent: "")
-        menu.addItem(staticZoomItem)
-        let liveZoomItem = NSMenuItem(title: "Live Zoom", action: #selector(AppController.activateLiveZoom), keyEquivalent: "")
-        menu.addItem(liveZoomItem)
-        let recordItem = NSMenuItem(title: "Record Screen", action: #selector(AppController.toggleRecording), keyEquivalent: "")
-        menu.addItem(recordItem)
-        let panoramaItem = NSMenuItem(title: "Panorama Capture", action: #selector(AppController.startPanorama), keyEquivalent: "")
-        menu.addItem(panoramaItem)
-        let breakItem = NSMenuItem(title: "Break Timer", action: #selector(AppController.toggleBreakTimer), keyEquivalent: "")
-        menu.addItem(breakItem)
-        menu.addItem(.separator())
-        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(AppController.showSettings), keyEquivalent: ",")
-        menu.addItem(settingsItem)
-        menu.addItem(NSMenuItem(title: "Check Permissions", action: #selector(AppController.checkPermissions), keyEquivalent: ""))
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(AppController.quit), keyEquivalent: "q"))
+        for entry in Self.statusMenuEntries() {
+            if entry.isSeparator {
+                menu.addItem(.separator())
+            } else {
+                menu.addItem(NSMenuItem(title: entry.title, action: entry.action, keyEquivalent: entry.keyEquivalent))
+            }
+        }
 
         for item in menu.items {
             item.target = controller
@@ -139,6 +130,42 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         item.menu = menu
         return item
+    }
+
+    /// A single status-bar menu entry (or a separator when `action` is nil).
+    struct StatusMenuEntry {
+        let title: String
+        let action: Selector?
+        let keyEquivalent: String
+
+        var isSeparator: Bool { action == nil }
+
+        static let separator = StatusMenuEntry(title: "", action: nil, keyEquivalent: "")
+
+        init(title: String, action: Selector?, keyEquivalent: String) {
+            self.title = title
+            self.action = action
+            self.keyEquivalent = keyEquivalent
+        }
+    }
+
+    /// The status-bar menu, ordered to match the Windows ZoomIt tray menu:
+    /// Options, Break Timer, Draw, Zoom, Live Zoom, Record, Check Permissions,
+    /// Quit. Panorama capture is a macOS-only addition, grouped with Record.
+    static func statusMenuEntries() -> [StatusMenuEntry] {
+        [
+            StatusMenuEntry(title: "Settings…", action: #selector(AppController.showSettings), keyEquivalent: ","),
+            .separator,
+            StatusMenuEntry(title: "Break Timer", action: #selector(AppController.toggleBreakTimer), keyEquivalent: ""),
+            StatusMenuEntry(title: "Draw", action: #selector(AppController.activateDrawWithoutZoom), keyEquivalent: ""),
+            StatusMenuEntry(title: "Static Zoom", action: #selector(AppController.activateStaticZoom), keyEquivalent: ""),
+            StatusMenuEntry(title: "Live Zoom", action: #selector(AppController.activateLiveZoom), keyEquivalent: ""),
+            StatusMenuEntry(title: "Record Screen", action: #selector(AppController.toggleRecording), keyEquivalent: ""),
+            StatusMenuEntry(title: "Panorama Capture", action: #selector(AppController.startPanorama), keyEquivalent: ""),
+            .separator,
+            StatusMenuEntry(title: "Check Permissions", action: #selector(AppController.checkPermissions), keyEquivalent: ""),
+            StatusMenuEntry(title: "Quit", action: #selector(AppController.quit), keyEquivalent: "q")
+        ]
     }
 
     /// Loads the bundled black template version of the Windows ZoomIt icon and

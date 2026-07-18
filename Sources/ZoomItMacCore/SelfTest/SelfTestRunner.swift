@@ -49,6 +49,7 @@ public enum SelfTestRunner {
         try testPanoramaSelectionBorderColor()
         try testPanoramaEscapeCancel()
         try testIdleSleepAssertionLifecycle()
+        try testStatusMenuOrderMatchesWindows()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -490,6 +491,40 @@ public enum SelfTestRunner {
         // end is idempotent: a second end must not release again.
         assertion.end()
         try expect(released == 1, "Expected end to be idempotent (no second release)")
+    }
+
+    /// The menu-bar menu should follow the Windows ZoomIt tray order:
+    /// Options, Break Timer, Draw, Zoom, Live Zoom, Record, Check Permissions,
+    /// Quit. (Panorama is a macOS-only extra grouped with Record.)
+    private static func testStatusMenuOrderMatchesWindows() throws {
+        let titles = AppDelegate.statusMenuEntries()
+            .filter { !$0.isSeparator }
+            .map(\.title)
+
+        // Map the Windows labels to their macOS equivalents and confirm they
+        // appear in the same relative order.
+        let windowsOrder = [
+            "Settings…",        // Options
+            "Break Timer",
+            "Draw",
+            "Static Zoom",      // Zoom
+            "Live Zoom",
+            "Record Screen",    // Record
+            "Check Permissions",
+            "Quit"
+        ]
+
+        let positions = windowsOrder.map { titles.firstIndex(of: $0) }
+        for (label, index) in zip(windowsOrder, positions) {
+            try expect(index != nil, "Expected status menu to contain '\(label)'")
+        }
+        let resolved = positions.compactMap { $0 }
+        try expect(resolved == resolved.sorted(),
+                   "Expected status menu items to follow the Windows order, got \(titles)")
+
+        // Options must be first and Quit last, as on Windows.
+        try expect(titles.first == "Settings…", "Expected Options/Settings to be the first menu item")
+        try expect(titles.last == "Quit", "Expected Quit to be the last menu item")
     }
 
     private static func testBreakTimerLayout() throws {
