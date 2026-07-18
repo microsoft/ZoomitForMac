@@ -50,6 +50,7 @@ public enum SelfTestRunner {
         try testPanoramaEscapeCancel()
         try testIdleSleepAssertionLifecycle()
         try testStatusMenuOrderMatchesWindows()
+        try testClipTransitionUpdatesOnChange()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -525,6 +526,32 @@ public enum SelfTestRunner {
         // Options must be first and Quit last, as on Windows.
         try expect(titles.first == "Settings…", "Expected Options/Settings to be the first menu item")
         try expect(titles.last == "Quit", "Expected Quit to be the last menu item")
+    }
+
+    /// Changing the clip transition popup from Fade to Black to Fade to White
+    /// must update the existing append boundary (previously it stayed black
+    /// because the transition was captured only at append time). Delete-seam
+    /// joins keep their own transition.
+    private static func testClipTransitionUpdatesOnChange() throws {
+        typealias Transition = VideoClipEditorController.Transition
+
+        // One append boundary starting as Fade to Black; switch to Fade to White.
+        let updated = VideoClipEditorController.updatedJoinTransitions(
+            current: [.fadeBlack],
+            isAppendJoin: [true],
+            newTransition: .fadeWhite
+        )
+        try expect(updated == [.fadeWhite], "Expected append boundary to switch to Fade to White, got \(updated)")
+
+        // Mixed: an append boundary adopts the new transition, a delete seam
+        // (not an append) keeps its existing value.
+        let mixed = VideoClipEditorController.updatedJoinTransitions(
+            current: [.fadeBlack, Transition.none],
+            isAppendJoin: [true, false],
+            newTransition: .fadeWhite
+        )
+        try expect(mixed == [.fadeWhite, Transition.none],
+                   "Expected only the append boundary to change, got \(mixed)")
     }
 
     private static func testBreakTimerLayout() throws {
