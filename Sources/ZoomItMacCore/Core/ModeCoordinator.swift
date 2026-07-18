@@ -331,9 +331,15 @@ final class ModeCoordinator {
         }
     }
 
+    /// At the zoom-out floor (1x), decides whether the overlay should exit.
+    /// Matches Windows ZoomIt: static zoom stays active at 1x, while live zoom
+    /// (and its typing sub-mode) still exits when zoomed all the way out.
+    static func exitsOnZoomOutFloor(mode: AppMode) -> Bool {
+        mode != .staticZoom
+    }
+
     private func zoomIn() {
         guard mode == .staticZoom || mode == .liveZoom || mode == .typing, !isExiting else { return }
-
         let settings = settingsStore.load()
         let current = viewportController.targetZoomFactor
         guard current < settings.maximumZoomFactor else { return }
@@ -345,12 +351,16 @@ final class ModeCoordinator {
 
     private func zoomOutOrExit() {
         guard mode == .staticZoom || mode == .liveZoom || mode == .typing, !isExiting else { return }
-
         let settings = settingsStore.load()
         let current = viewportController.targetZoomFactor
-        // At 1x there is nothing left to zoom out of, so exit the overlay.
+        // At 1x there is nothing left to zoom out of.
         guard current > settings.minimumZoomFactor else {
-            animateExit()
+            // Static zoom matches Windows ZoomIt: it stays active at 1x instead
+            // of exiting when the user zooms all the way out. Only Esc (or right
+            // click) exits static zoom. Live zoom still exits at 1x.
+            if Self.exitsOnZoomOutFloor(mode: mode) {
+                animateExit()
+            }
             return
         }
 

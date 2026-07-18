@@ -30,6 +30,7 @@ public enum SelfTestRunner {
         try testDemoTypeTypingDelayRange()
         try testDemoTypeUserDrivenStepStopsAtEnd()
         try testBreakTimerLayout()
+        try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
         try testPanoramaVerticalSeamKeepsSingleFrame()
@@ -337,6 +338,18 @@ public enum SelfTestRunner {
 
         try expect(DemoTypeController.completedUserDrivenEntryOffsetForTesting(script, startOffset: 7) == script.count, "Expected final [end] to leave DemoType at EOF instead of wrapping in the active entry")
         try expect(DemoTypeController.completedUserDrivenEntryOffsetForTesting("abc", startOffset: 0) == 0, "Expected scripts without [end] to wrap after EOF")
+    }
+
+    private static func testStaticZoomStaysAtOneX() throws {
+        // Windows ZoomIt keeps static zoom active when the user zooms all the
+        // way out to 1x; only Esc/right-click exits. Live zoom still exits at
+        // the floor.
+        try expect(ModeCoordinator.exitsOnZoomOutFloor(mode: .staticZoom) == false,
+                   "Expected static zoom to stay active at 1x instead of exiting")
+        try expect(ModeCoordinator.exitsOnZoomOutFloor(mode: .liveZoom),
+                   "Expected live zoom to exit when zoomed out to 1x")
+        try expect(ModeCoordinator.exitsOnZoomOutFloor(mode: .typing),
+                   "Expected typing (live zoom sub-mode) to exit when zoomed out to 1x")
     }
 
     private static func testBreakTimerLayout() throws {
