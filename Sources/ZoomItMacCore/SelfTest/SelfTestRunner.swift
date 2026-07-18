@@ -46,6 +46,7 @@ public enum SelfTestRunner {
         try testDemoTypeUserDrivenStepStopsAtEnd()
         try testBreakTimerLayout()
         try testBreakTimerBackgroundNotFlipped()
+        try testPanoramaSelectionBorderColor()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -404,6 +405,48 @@ public enum SelfTestRunner {
                    "Expected break timer background top to stay red (right-side up), got \(top)")
         try expect(bottom.blueComponent > 0.5 && bottom.redComponent < 0.5,
                    "Expected break timer background bottom to stay blue (right-side up), got \(bottom)")
+    }
+
+    /// Windows ZoomIt draws the panorama region rectangle in yellow. The shared
+    /// selection view defaults to white (snip/record) but the panorama selector
+    /// requests yellow; verify the requested border colour is actually rendered.
+    private static func testPanoramaSelectionBorderColor() throws {
+        let dim = 40
+        // A solid grey backing image for the selector.
+        guard let context = CGContext(
+            data: nil, width: dim, height: dim, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw SelfTestError.failure("Could not create selector backing context")
+        }
+        context.setFillColor(NSColor(white: 0.5, alpha: 1).cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: dim, height: dim))
+        guard let image = context.makeImage() else {
+            throw SelfTestError.failure("Could not create selector backing image")
+        }
+
+        let selection = CGRect(x: 8, y: 8, width: 24, height: 24)
+
+        func borderIsYellow(_ view: SnipSelectionView) throws -> Bool {
+            guard let rep = view.renderForTesting(selection: selection) else {
+                throw SelfTestError.failure("Selector render returned no bitmap")
+            }
+            let scaleX = rep.pixelsWide / dim
+            let scaleY = rep.pixelsHigh / dim
+            // Sample the middle of the top border edge of the selection rect.
+            let px = Int(selection.midX) * scaleX
+            let py = Int(selection.minY) * scaleY
+            guard let c = rep.colorAt(x: px, y: py) else {
+                throw SelfTestError.failure("Could not sample selector border pixel")
+            }
+            return c.redComponent > 0.5 && c.greenComponent > 0.5 && c.blueComponent < 0.4
+        }
+
+        let yellowView = SnipSelectionView(frame: CGRect(x: 0, y: 0, width: dim, height: dim), image: image, borderColor: .yellow)
+        try expect(try borderIsYellow(yellowView), "Expected panorama selection border to render yellow")
+
+        let whiteView = SnipSelectionView(frame: CGRect(x: 0, y: 0, width: dim, height: dim), image: image)
+        try expect(try !borderIsYellow(whiteView), "Expected default snip selection border to remain non-yellow (white)")
     }
 
     private static func testBreakTimerLayout() throws {
