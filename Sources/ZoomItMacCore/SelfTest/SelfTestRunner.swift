@@ -54,6 +54,7 @@ public enum SelfTestRunner {
         try testWebcamOverlayDragOrigin()
         try testTrimSavePreservesOriginal()
         try testSettingsWindowStaysOnTop()
+        try testZoomAndLiveZoomAreSeparateTabs()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -607,6 +608,19 @@ public enum SelfTestRunner {
         SettingsWindowController.configureAlwaysOnTop(window)
         try expect(window.level == .floating, "Expected settings window to float above other windows")
         try expect(window.hidesOnDeactivate == false, "Expected settings window not to hide when the app deactivates")
+    }
+
+    /// Windows keeps static-zoom and live-zoom settings on separate tabs (the
+    /// Zoom tab is static-only). Verify the Mac Options dialog exposes a
+    /// distinct "Live Zoom" tab immediately after "Zoom".
+    private static func testZoomAndLiveZoomAreSeparateTabs() throws {
+        let titles = SettingsWindowController.settingsTabTitles
+        guard let zoomIndex = titles.firstIndex(of: "Zoom") else {
+            throw SelfTestError.failure("Expected a Zoom tab in the Options dialog")
+        }
+        try expect(titles.contains("Live Zoom"), "Expected a separate Live Zoom tab")
+        try expect(titles.firstIndex(of: "Live Zoom") == zoomIndex + 1,
+                   "Expected Live Zoom to be its own tab right after Zoom, got \(titles)")
     }
 
     private static func testBreakTimerLayout() throws {

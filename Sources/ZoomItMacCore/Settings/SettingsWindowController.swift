@@ -150,22 +150,37 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     // MARK: - Window construction
 
+    /// The Options dialog tabs, in order. Zoom and Live Zoom are separate tabs
+    /// (matching Windows ZoomIt, whose Zoom tab holds static-zoom settings only).
+    static let settingsTabTitles = [
+        "General", "Zoom", "Live Zoom", "Draw", "Type",
+        "DemoType", "Break", "Snip", "Record", "Panorama"
+    ]
+
+    private func viewForTab(_ title: String) -> NSView {
+        switch title {
+        case "General": return makeGeneralTab()
+        case "Zoom": return makeZoomTab()
+        case "Live Zoom": return makeLiveZoomTab()
+        case "Draw": return makeDrawTab()
+        case "Type": return makeTypeTab()
+        case "DemoType": return makeDemoTypeTab()
+        case "Break": return makeBreakTab()
+        case "Snip": return makeSnipTab()
+        case "Record": return makeRecordTab()
+        case "Panorama": return makePanoramaTab()
+        default: return NSView()
+        }
+    }
+
     private func makeWindow() -> NSWindow {
         // Build each tab's content and measure the tallest one so every tab can
         // share a single height. Equal-height tabs keep the tab view a constant
         // size, which in turn keeps the footer anchored near the bottom no
         // matter which tab is selected.
-        let tabs: [(String, NSView)] = [
-            ("General", makeGeneralTab()),
-            ("Zoom", makeZoomTab()),
-            ("Draw", makeDrawTab()),
-            ("Type", makeTypeTab()),
-            ("DemoType", makeDemoTypeTab()),
-            ("Break", makeBreakTab()),
-            ("Snip", makeSnipTab()),
-            ("Record", makeRecordTab()),
-            ("Panorama", makePanoramaTab())
-        ]
+        let tabs: [(String, NSView)] = Self.settingsTabTitles.map { title in
+            (title, viewForTab(title))
+        }
 
         var maxContentHeight: CGFloat = 0
         for (_, content) in tabs {
@@ -403,18 +418,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.hotKeyButton = hotKeyButton
         let hotKeyRow = makeRow([makeLabel("Zoom toggle:"), hotKeyButton])
 
-        let liveHelp = makeLabel(
-            "Live zoom magnifies the live screen so motion and updates stay visible while zoomed. Use the same zoom and pan controls.",
-            wraps: true
-        )
-
-        let liveHotKeyButton = NSButton(title: liveHotKeyDisplayString(), target: self, action: #selector(toggleLiveHotKeyRecording(_:)))
-        liveHotKeyButton.bezelStyle = .rounded
-        liveHotKeyButton.setButtonType(.momentaryPushIn)
-        liveHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
-        self.liveHotKeyButton = liveHotKeyButton
-        let liveHotKeyRow = makeRow([makeLabel("Live zoom toggle:"), liveHotKeyButton])
-
         let magHelp = makeLabel("Specify the initial level of magnification when zooming in:", wraps: true)
 
         let magPopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -436,7 +439,27 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let smoothCheck = NSButton(checkboxWithTitle: "Smooth zoomed image", target: self, action: #selector(smoothImageChanged(_:)))
         smoothCheck.state = settings.smoothImage ? .on : .off
 
-        return makeColumn([help, hotKeyRow, liveHelp, liveHotKeyRow, magHelp, magRow, animateCheck, smoothCheck])
+        return makeColumn([help, hotKeyRow, magHelp, magRow, animateCheck, smoothCheck])
+    }
+
+    // MARK: - Live Zoom tab
+
+    /// Live zoom lives on its own tab so the Zoom tab holds only static-zoom
+    /// settings, matching the Windows ZoomIt options dialog.
+    private func makeLiveZoomTab() -> NSView {
+        let liveHelp = makeLabel(
+            "Live zoom magnifies the live screen so motion and updates stay visible while zoomed. Use the same zoom and pan controls.",
+            wraps: true
+        )
+
+        let liveHotKeyButton = NSButton(title: liveHotKeyDisplayString(), target: self, action: #selector(toggleLiveHotKeyRecording(_:)))
+        liveHotKeyButton.bezelStyle = .rounded
+        liveHotKeyButton.setButtonType(.momentaryPushIn)
+        liveHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+        self.liveHotKeyButton = liveHotKeyButton
+        let liveHotKeyRow = makeRow([makeLabel("Live zoom toggle:"), liveHotKeyButton])
+
+        return makeColumn([liveHelp, liveHotKeyRow])
     }
 
     @objc private func zoomLevelChanged(_ sender: NSPopUpButton) {
