@@ -56,6 +56,7 @@ public enum SelfTestRunner {
         try testSettingsWindowStaysOnTop()
         try testZoomAndLiveZoomAreSeparateTabs()
         try testBlankScreenUsesControlKeys()
+        try testTypeTabFontSampleUsesSelectedFont()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -637,6 +638,23 @@ public enum SelfTestRunner {
                    "Expected Shift+W/K to select the highlighter")
         try expect(ZoomCanvasView.whiteBlackKeyAction(control: true, shift: false, isDrawingMode: false) == .penColor,
                    "Expected Ctrl+W/K outside drawing mode to fall back to the pen colour")
+    }
+
+    /// The Type tab's "Sample" preview must render in the selected typing font
+    /// (it previously always used the system font, so font changes weren't
+    /// visible). Also verify the preview size is clamped to a legible range.
+    private static func testTypeTabFontSampleUsesSelectedFont() throws {
+        // A concrete named font should be reflected in the preview font.
+        let courier = SettingsWindowController.fontSamplePreviewFont(name: "Courier", size: 24)
+        try expect(courier.fontName.lowercased().contains("courier"),
+                   "Expected the font sample preview to use the selected font, got \(courier.fontName)")
+
+        // Preview size clamps: very large selections shrink to <= 36pt, very
+        // small ones grow to >= 12pt, so the sample stays legible.
+        let big = SettingsWindowController.fontSamplePreviewFont(name: "Courier", size: 200)
+        try expect(big.pointSize <= 36, "Expected large font preview to clamp to 36pt, got \(big.pointSize)")
+        let small = SettingsWindowController.fontSamplePreviewFont(name: "Courier", size: 4)
+        try expect(small.pointSize >= 12, "Expected small font preview to clamp to 12pt, got \(small.pointSize)")
     }
 
     private static func testBreakTimerLayout() throws {

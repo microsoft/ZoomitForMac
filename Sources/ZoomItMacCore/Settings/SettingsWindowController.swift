@@ -1389,9 +1389,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func updateFontSample() {
-        let font = currentTypingFont()
-        fontSampleLabel?.font = NSFont.systemFont(ofSize: 18)
+        let font = Self.fontSamplePreviewFont(name: settings.typingFontName, size: settings.typingFontSize)
+        // Render the sample in the actually-selected font so choosing a new font
+        // is reflected immediately (it previously always used the system font).
+        fontSampleLabel?.font = font
         fontSampleLabel?.stringValue = "Sample — \(font.displayName ?? font.fontName) \(Int(settings.typingFontSize))pt"
+    }
+
+    /// Font used for the Type tab's live "Sample" preview. Uses the selected
+    /// typing font, clamped to a legible on-screen preview size.
+    static func fontSamplePreviewFont(name: String, size: CGFloat) -> NSFont {
+        let previewSize = min(max(size, 12), 36)
+        return AnnotationController.typingFont(named: name, size: previewSize)
     }
 
     @objc private func selectFont(_ sender: NSButton) {
