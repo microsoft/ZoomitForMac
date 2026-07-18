@@ -55,6 +55,7 @@ public enum SelfTestRunner {
         try testTrimSavePreservesOriginal()
         try testSettingsWindowStaysOnTop()
         try testZoomAndLiveZoomAreSeparateTabs()
+        try testBlankScreenUsesControlKeys()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -621,6 +622,21 @@ public enum SelfTestRunner {
         try expect(titles.contains("Live Zoom"), "Expected a separate Live Zoom tab")
         try expect(titles.firstIndex(of: "Live Zoom") == zoomIndex + 1,
                    "Expected Live Zoom to be its own tab right after Zoom, got \(titles)")
+    }
+
+    /// The blank-screen sketch pad is triggered with Ctrl+W / Ctrl+K while
+    /// drawing (matching the corrected Draw-tab help), leaving plain W/K for the
+    /// white/black pen and Shift+W/K for the highlighter.
+    private static func testBlankScreenUsesControlKeys() throws {
+        typealias Action = ZoomCanvasView.WhiteBlackKeyAction
+        try expect(ZoomCanvasView.whiteBlackKeyAction(control: true, shift: false, isDrawingMode: true) == .blankScreen,
+                   "Expected Ctrl+W/Ctrl+K to blank the screen while drawing")
+        try expect(ZoomCanvasView.whiteBlackKeyAction(control: false, shift: false, isDrawingMode: true) == .penColor,
+                   "Expected plain W/K to select the pen colour, not blank the screen")
+        try expect(ZoomCanvasView.whiteBlackKeyAction(control: false, shift: true, isDrawingMode: true) == .highlightColor,
+                   "Expected Shift+W/K to select the highlighter")
+        try expect(ZoomCanvasView.whiteBlackKeyAction(control: true, shift: false, isDrawingMode: false) == .penColor,
+                   "Expected Ctrl+W/K outside drawing mode to fall back to the pen colour")
     }
 
     private static func testBreakTimerLayout() throws {

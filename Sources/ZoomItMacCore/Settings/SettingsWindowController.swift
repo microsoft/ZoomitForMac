@@ -37,9 +37,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
 
-    // Draw tab controls that need live updates.
-    private weak var penWidthLabel: NSTextField?
-
     // Type tab controls.
     private weak var fontSampleLabel: NSTextField?
 
@@ -787,19 +784,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let screenSection = makeSectionLabel("Screen")
         let screenHelp = makeLabel(
-            "Press W or K to blank the screen white or black as a sketch pad.",
+            "Press Ctrl+W or Ctrl+K to blank the screen white or black as a sketch pad.",
             wraps: true
         )
-
-        let slider = NSSlider(value: Double(settings.rootPenWidth), minValue: 1, maxValue: 20, target: self, action: #selector(penWidthChanged(_:)))
-        slider.translatesAutoresizingMaskIntoConstraints = false
-        slider.numberOfTickMarks = 20
-        slider.allowsTickMarkValuesOnly = true
-        slider.widthAnchor.constraint(equalToConstant: 200).isActive = true
-
-        let widthValue = makeLabel("\(Int(settings.rootPenWidth))")
-        penWidthLabel = widthValue
-        let widthRow = makeRow([makeLabel("Default pen width:"), slider, widthValue])
 
         let drawHotKeyButton = NSButton(title: drawHotKeyDisplayString(), target: self, action: #selector(toggleDrawHotKeyRecording(_:)))
         drawHotKeyButton.bezelStyle = .rounded
@@ -811,7 +798,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         return makeColumn([
             help,
             penSection,
-            makeIndentedColumn([penHelp, widthRow]),
+            makeIndentedColumn([penHelp]),
             colorsSection,
             makeIndentedColumn([colorsHelp]),
             highlightSection,
@@ -822,12 +809,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             makeIndentedColumn([screenHelp]),
             drawHotKeyRow
         ], spacing: 6)
-    }
-
-    @objc private func penWidthChanged(_ sender: NSSlider) {
-        settings.rootPenWidth = CGFloat(sender.intValue)
-        penWidthLabel?.stringValue = "\(sender.intValue)"
-        persist()
     }
 
     // MARK: - Type tab

@@ -443,6 +443,7 @@ final class ZoomCanvasView: NSView {
     private func handleDrawingShortcut(_ event: NSEvent) -> Void? {
         guard let key = event.charactersIgnoringModifiers?.lowercased() else { return nil }
         let shift = event.modifierFlags.contains(.shift)
+        let control = event.modifierFlags.contains(.control)
 
         switch key {
         case "r": commandSink(shift ? .setHighlightColor(.red) : .setColor(.red))
@@ -452,22 +453,19 @@ final class ZoomCanvasView: NSView {
         case "o": commandSink(shift ? .setHighlightColor(.orange) : .setColor(.orange))
         case "p": commandSink(shift ? .setHighlightColor(.pink) : .setColor(.pink))
         case "w":
-            // Shift+W highlights white; otherwise W blanks the screen (in
-            // drawing mode) or selects the white pen.
-            if shift {
-                commandSink(.setHighlightColor(.white))
-            } else if isDrawingMode {
-                toggleBlankScreen(.white)
-            } else {
-                commandSink(.setColor(.white))
+            // Ctrl+W blanks the screen white as a sketch pad (matches the Draw
+            // tab help); Shift+W selects the white highlighter; plain W selects
+            // the white pen.
+            switch Self.whiteBlackKeyAction(control: control, shift: shift, isDrawingMode: isDrawingMode) {
+            case .blankScreen: toggleBlankScreen(.white)
+            case .highlightColor: commandSink(.setHighlightColor(.white))
+            case .penColor: commandSink(.setColor(.white))
             }
         case "k":
-            if shift {
-                commandSink(.setHighlightColor(.black))
-            } else if isDrawingMode {
-                toggleBlankScreen(.black)
-            } else {
-                commandSink(.setColor(.black))
+            switch Self.whiteBlackKeyAction(control: control, shift: shift, isDrawingMode: isDrawingMode) {
+            case .blankScreen: toggleBlankScreen(.black)
+            case .highlightColor: commandSink(.setHighlightColor(.black))
+            case .penColor: commandSink(.setColor(.black))
             }
         case "f": commandSink(.setTool(.pen))
         case "l": commandSink(.setTool(.line))
@@ -491,6 +489,17 @@ final class ZoomCanvasView: NSView {
     private func toggleBlankScreen(_ screen: BlankScreen) {
         blankScreen = (blankScreen == screen) ? nil : screen
         needsDisplay = true
+    }
+
+    enum WhiteBlackKeyAction: Equatable { case blankScreen, highlightColor, penColor }
+
+    /// Decides what the W/K keys do while drawing: Ctrl blanks the screen (white
+    /// or black sketch pad), Shift selects the highlighter of that shade, and
+    /// plain selects the solid pen colour.
+    static func whiteBlackKeyAction(control: Bool, shift: Bool, isDrawingMode: Bool) -> WhiteBlackKeyAction {
+        if control && isDrawingMode { return .blankScreen }
+        if shift { return .highlightColor }
+        return .penColor
     }
 
     private func drawTypingCaret(in context: CGContext, source: CGRect) {
