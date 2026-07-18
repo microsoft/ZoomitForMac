@@ -52,6 +52,7 @@ public enum SelfTestRunner {
         try testStatusMenuOrderMatchesWindows()
         try testClipTransitionUpdatesOnChange()
         try testWebcamOverlayDragOrigin()
+        try testTrimSavePreservesOriginal()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -571,6 +572,23 @@ public enum SelfTestRunner {
         // Move the cursor by (+50, -70); the window origin should move the same.
         let moved = WebcamOverlayController.draggedWindowOrigin(mouseOnScreen: CGPoint(x: 190, y: 160), grabOffset: grabOffset)
         try expect(moved == CGPoint(x: 150, y: 130), "Expected dragged origin to track the cursor, got \(moved)")
+    }
+
+    /// Trimming an existing video and saving under a new name must NOT delete
+    /// the user's original file (it did, because the source was moved). When no
+    /// edits were made the editor returns the original URL and we copy it;
+    /// otherwise it returns an exported temp file that we move.
+    private static func testTrimSavePreservesOriginal() throws {
+        let original = URL(fileURLWithPath: "/tmp/original.mp4")
+
+        // No edits: editor hands back the original URL -> copy (preserve source).
+        try expect(RecordingController.trimSaveAction(editedURL: original, originalURL: original) == .copy,
+                   "Expected an unedited trim save to copy the original, preserving it")
+
+        // Edited: editor exported a temp file -> move it (original untouched).
+        let exported = URL(fileURLWithPath: "/tmp/ZoomIt-edit-1234.mp4")
+        try expect(RecordingController.trimSaveAction(editedURL: exported, originalURL: original) == .move,
+                   "Expected an edited trim save to move the exported temp file")
     }
 
     private static func testBreakTimerLayout() throws {
