@@ -149,19 +149,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The status-bar menu, ordered to match the Windows ZoomIt tray menu:
-    /// Options, Break Timer, Draw, Zoom, Live Zoom, Record, Check Permissions,
-    /// Quit. Panorama capture is a macOS-only addition, grouped with Record.
+    /// The status-bar menu. It broadly follows the Windows ZoomIt tray order
+    /// (Options first, then the modes, then Check Permissions and Quit), with
+    /// Panorama Capture as a macOS-only addition after Record and the Break
+    /// Timer placed at the end of the mode group (below Panorama Capture).
     static func statusMenuEntries() -> [StatusMenuEntry] {
         [
             StatusMenuEntry(title: "Settings…", action: #selector(AppController.showSettings), keyEquivalent: ","),
             .separator,
-            StatusMenuEntry(title: "Break Timer", action: #selector(AppController.toggleBreakTimer), keyEquivalent: ""),
             StatusMenuEntry(title: "Draw", action: #selector(AppController.activateDrawWithoutZoom), keyEquivalent: ""),
             StatusMenuEntry(title: "Static Zoom", action: #selector(AppController.activateStaticZoom), keyEquivalent: ""),
             StatusMenuEntry(title: "Live Zoom", action: #selector(AppController.activateLiveZoom), keyEquivalent: ""),
             StatusMenuEntry(title: "Record Screen", action: #selector(AppController.toggleRecording), keyEquivalent: ""),
             StatusMenuEntry(title: "Panorama Capture", action: #selector(AppController.startPanorama), keyEquivalent: ""),
+            StatusMenuEntry(title: "Break Timer", action: #selector(AppController.toggleBreakTimer), keyEquivalent: ""),
             .separator,
             StatusMenuEntry(title: "Check Permissions", action: #selector(AppController.checkPermissions), keyEquivalent: ""),
             StatusMenuEntry(title: "Quit", action: #selector(AppController.quit), keyEquivalent: "q")

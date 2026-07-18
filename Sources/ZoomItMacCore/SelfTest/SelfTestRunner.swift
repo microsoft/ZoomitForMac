@@ -501,34 +501,44 @@ public enum SelfTestRunner {
         try expect(released == 1, "Expected end to be idempotent (no second release)")
     }
 
-    /// The menu-bar menu should follow the Windows ZoomIt tray order:
-    /// Options, Break Timer, Draw, Zoom, Live Zoom, Record, Check Permissions,
-    /// Quit. (Panorama is a macOS-only extra grouped with Record.)
+    /// The menu-bar menu broadly follows the Windows ZoomIt tray order (Options
+    /// first, modes, then Check Permissions and Quit), with Panorama as a
+    /// macOS-only extra after Record and the Break Timer placed below Panorama
+    /// Capture.
     private static func testStatusMenuOrderMatchesWindows() throws {
         let titles = AppDelegate.statusMenuEntries()
             .filter { !$0.isSeparator }
             .map(\.title)
 
-        // Map the Windows labels to their macOS equivalents and confirm they
-        // appear in the same relative order.
-        let windowsOrder = [
+        // Confirm the items appear in the expected relative order.
+        let expectedOrder = [
             "Settings…",        // Options
-            "Break Timer",
             "Draw",
             "Static Zoom",      // Zoom
             "Live Zoom",
             "Record Screen",    // Record
+            "Panorama Capture", // macOS-only, after Record
+            "Break Timer",      // moved below Panorama Capture
             "Check Permissions",
             "Quit"
         ]
 
-        let positions = windowsOrder.map { titles.firstIndex(of: $0) }
-        for (label, index) in zip(windowsOrder, positions) {
+        let positions = expectedOrder.map { titles.firstIndex(of: $0) }
+        for (label, index) in zip(expectedOrder, positions) {
             try expect(index != nil, "Expected status menu to contain '\(label)'")
         }
         let resolved = positions.compactMap { $0 }
         try expect(resolved == resolved.sorted(),
-                   "Expected status menu items to follow the Windows order, got \(titles)")
+                   "Expected status menu items to follow the expected order, got \(titles)")
+
+        // Break Timer must come after Panorama Capture.
+        if let breakIndex = titles.firstIndex(of: "Break Timer"),
+           let panoramaIndex = titles.firstIndex(of: "Panorama Capture") {
+            try expect(breakIndex > panoramaIndex,
+                       "Expected Break Timer to be below Panorama Capture, got \(titles)")
+        } else {
+            throw SelfTestError.failure("Expected both Break Timer and Panorama Capture menu items")
+        }
 
         // Options must be first and Quit last, as on Windows.
         try expect(titles.first == "Settings…", "Expected Options/Settings to be the first menu item")
