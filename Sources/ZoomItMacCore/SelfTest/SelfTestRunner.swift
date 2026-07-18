@@ -48,6 +48,7 @@ public enum SelfTestRunner {
         try testBreakTimerBackgroundNotFlipped()
         try testPanoramaSelectionBorderColor()
         try testPanoramaEscapeCancel()
+        try testIdleSleepAssertionLifecycle()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -459,6 +460,36 @@ public enum SelfTestRunner {
                    "Expected Escape to be ignored when not capturing")
         try expect(PanoramaController.shouldCancelOnEscape(isCapturing: true, alreadyCancelled: true) == false,
                    "Expected a repeated Escape to be ignored once already cancelled")
+    }
+
+    /// The break timer suppresses the screen saver by holding a display-sleep
+    /// assertion. Verify the assertion is acquired once on begin, released on
+    /// end, and that both operations are idempotent.
+    private static func testIdleSleepAssertionLifecycle() throws {
+        var created = 0
+        var released = 0
+        let assertion = IdleSleepAssertion(
+            create: { _ in created += 1; return IOPMAssertionID(created) },
+            release: { _ in released += 1 }
+        )
+
+        try expect(assertion.isActive == false, "Expected assertion to start inactive")
+
+        assertion.begin(reason: "test")
+        try expect(assertion.isActive, "Expected assertion active after begin")
+        try expect(created == 1, "Expected exactly one assertion created")
+
+        // begin is idempotent: a second begin must not create another.
+        assertion.begin(reason: "test")
+        try expect(created == 1, "Expected begin to be idempotent (no second create)")
+
+        assertion.end()
+        try expect(assertion.isActive == false, "Expected assertion inactive after end")
+        try expect(released == 1, "Expected exactly one assertion released")
+
+        // end is idempotent: a second end must not release again.
+        assertion.end()
+        try expect(released == 1, "Expected end to be idempotent (no second release)")
     }
 
     private static func testBreakTimerLayout() throws {

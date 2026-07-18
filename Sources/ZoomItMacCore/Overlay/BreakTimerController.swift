@@ -77,6 +77,9 @@ final class BreakTimerController {
     private var window: NSWindow?
     private weak var timerView: BreakTimerView?
     private var onFinished: (() -> Void)?
+    /// Keeps the display awake / screen saver suppressed while the break timer
+    /// is on screen, matching Windows ZoomIt.
+    private let idleSleepAssertion = IdleSleepAssertion()
 
     init(displayManager: DisplayManager, captureService: ScreenCaptureService, settingsStore: SettingsStore) {
         self.displayManager = displayManager
@@ -129,6 +132,7 @@ final class BreakTimerController {
         self.window = window
         self.timerView = timerView
         self.onFinished = onFinished
+        idleSleepAssertion.begin(reason: "ZoomIt break timer")
         timerView.start()
     }
 
@@ -138,6 +142,7 @@ final class BreakTimerController {
 
     private func close(notify: Bool) {
         timerView?.prepareForClose()
+        idleSleepAssertion.end()
         guard let window else { return }
 
         window.orderOut(nil)
