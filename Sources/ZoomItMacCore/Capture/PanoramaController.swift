@@ -53,6 +53,13 @@ final class PanoramaController {
 
     private(set) var isCapturing = false
     private var stopRequested = false
+    /// Set when the user presses Escape during the scrolling capture so the run
+    /// is discarded (matches Windows ZoomIt, where Escape cancels panorama).
+    private var captureCancelled = false
+    /// Event monitors that watch for Escape while capturing, so the user can
+    /// cancel even while another app is frontmost (they scroll it).
+    private var escapeGlobalMonitor: Any?
+    private var escapeLocalMonitor: Any?
     /// True from the moment a panorama is initiated (region selection) until it
     /// finishes, so a second trigger can't stack a new selection.
     private var isActive = false
@@ -181,6 +188,8 @@ final class PanoramaController {
         showBorder(display: display, region: region)
         isCapturing = true
         stopRequested = false
+        captureCancelled = false
+        installEscapeMonitor()
         onStateChange?(true)
 
         Task { @MainActor in
@@ -218,6 +227,15 @@ final class PanoramaController {
                 // Match Windows' ~16 ms cadence; duplicate filtering and memory
                 // caps keep the retained frame set bounded.
                 try? await Task.sleep(nanoseconds: 16_000_000)
+            }
+
+            // Escape cancels the whole panorama (Windows behaviour): discard the
+            // captured frames instead of stitching them.
+            if captureCancelled {
+                isCapturing = false
+                onStateChange?(false)
+                showCompletion(message: "Panorama cancelled")
+                return
             }
 
             if stopRequested && frames.count < maxFrames && totalBytes + frameBytes <= maxFrameBytes {
@@ -551,6 +569,7 @@ final class PanoramaController {
     }
 
     private func hideOverlays() {
+        removeEscapeMonitor()
         borderWindow?.orderOut(nil)
         borderWindow = nil
         bannerWindow?.orderOut(nil)
@@ -560,6 +579,46 @@ final class PanoramaController {
         progressIndicator = nil
         stitchTask?.cancel()
         stitchTask = nil
+    }
+
+    /// Requests cancellation of an in-progress scrolling capture (Escape).
+    private func cancelCapture() {
+        guard Self.shouldCancelOnEscape(isCapturing: isCapturing, alreadyCancelled: captureCancelled) else { return }
+        captureCancelled = true
+        stopRequested = true
+    }
+
+    /// Decides whether an Escape press should cancel the panorama. Escape only
+    /// cancels while actively capturing and ignores repeats once cancelled.
+    static func shouldCancelOnEscape(isCapturing: Bool, alreadyCancelled: Bool) -> Bool {
+        isCapturing && !alreadyCancelled
+    }
+
+    /// Watches for Escape during capture. A global monitor handles the common
+    /// case where the user is scrolling another (frontmost) app; a local
+    /// monitor covers the case where ZoomIt itself is frontmost.
+    private func installEscapeMonitor() {
+        removeEscapeMonitor()
+        escapeGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            Task { @MainActor in self?.cancelCapture() }
+        }
+        escapeLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            guard event.keyCode == 53 else { return event }
+            Task { @MainActor in self?.cancelCapture() }
+            return nil
+        }
+    }
+
+    private func removeEscapeMonitor() {
+        if let monitor = escapeGlobalMonitor {
+            NSEvent.removeMonitor(monitor)
+            escapeGlobalMonitor = nil
+        }
+        if let monitor = escapeLocalMonitor {
+            NSEvent.removeMonitor(monitor)
+            escapeLocalMonitor = nil
+        }
     }
 
     // MARK: - CGImage <-> Frame

@@ -47,6 +47,7 @@ public enum SelfTestRunner {
         try testBreakTimerLayout()
         try testBreakTimerBackgroundNotFlipped()
         try testPanoramaSelectionBorderColor()
+        try testPanoramaEscapeCancel()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -447,6 +448,17 @@ public enum SelfTestRunner {
 
         let whiteView = SnipSelectionView(frame: CGRect(x: 0, y: 0, width: dim, height: dim), image: image)
         try expect(try !borderIsYellow(whiteView), "Expected default snip selection border to remain non-yellow (white)")
+    }
+
+    /// Escape during the scrolling panorama capture must cancel the run, but
+    /// only while it is actively capturing, and repeated Escapes are ignored.
+    private static func testPanoramaEscapeCancel() throws {
+        try expect(PanoramaController.shouldCancelOnEscape(isCapturing: true, alreadyCancelled: false),
+                   "Expected Escape to cancel an active panorama capture")
+        try expect(PanoramaController.shouldCancelOnEscape(isCapturing: false, alreadyCancelled: false) == false,
+                   "Expected Escape to be ignored when not capturing")
+        try expect(PanoramaController.shouldCancelOnEscape(isCapturing: true, alreadyCancelled: true) == false,
+                   "Expected a repeated Escape to be ignored once already cancelled")
     }
 
     private static func testBreakTimerLayout() throws {
