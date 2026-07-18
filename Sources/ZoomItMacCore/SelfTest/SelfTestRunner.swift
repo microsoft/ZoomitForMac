@@ -51,6 +51,7 @@ public enum SelfTestRunner {
         try testIdleSleepAssertionLifecycle()
         try testStatusMenuOrderMatchesWindows()
         try testClipTransitionUpdatesOnChange()
+        try testWebcamOverlayDragOrigin()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -552,6 +553,24 @@ public enum SelfTestRunner {
         )
         try expect(mixed == [.fadeWhite, Transition.none],
                    "Expected only the append boundary to change, got \(mixed)")
+    }
+
+    /// Dragging the webcam picture-in-picture must keep the grabbed point under
+    /// the cursor: the new window origin is the cursor position minus the grab
+    /// offset within the window.
+    private static func testWebcamOverlayDragOrigin() throws {
+        // Window was at origin (100, 200) with size 160x120; the user grabbed a
+        // point 40,30 inside it, so grabOffset = (40, 30). Grab point on screen
+        // was (140, 230).
+        let grabOffset = CGSize(width: 40, height: 30)
+
+        // No movement: cursor still at the original grab point -> origin unchanged.
+        let unchanged = WebcamOverlayController.draggedWindowOrigin(mouseOnScreen: CGPoint(x: 140, y: 230), grabOffset: grabOffset)
+        try expect(unchanged == CGPoint(x: 100, y: 200), "Expected unchanged origin when cursor hasn't moved, got \(unchanged)")
+
+        // Move the cursor by (+50, -70); the window origin should move the same.
+        let moved = WebcamOverlayController.draggedWindowOrigin(mouseOnScreen: CGPoint(x: 190, y: 160), grabOffset: grabOffset)
+        try expect(moved == CGPoint(x: 150, y: 130), "Expected dragged origin to track the cursor, got \(moved)")
     }
 
     private static func testBreakTimerLayout() throws {

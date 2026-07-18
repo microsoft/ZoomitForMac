@@ -8,6 +8,32 @@ struct WebcamRecordingFrame: @unchecked Sendable {
     let cornerRadius: CGFloat
 }
 
+/// The webcam overlay's content view. It lets the user click and drag the
+/// picture-in-picture to reposition it (matching Windows ZoomIt), moving the
+/// hosting window and reporting the new screen frame so the recorded
+/// composite follows.
+private final class DraggableWebcamView: NSView {
+    /// Called with the window's new screen frame whenever the overlay is moved.
+    var onMoved: ((CGRect) -> Void)?
+    /// The point grabbed within the window at mouse-down (bottom-left origin).
+    private var grabOffset: CGSize = .zero
+
+    override func mouseDown(with event: NSEvent) {
+        let location = event.locationInWindow
+        grabOffset = CGSize(width: location.x, height: location.y)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let window else { return }
+        let origin = WebcamOverlayController.draggedWindowOrigin(
+            mouseOnScreen: NSEvent.mouseLocation,
+            grabOffset: grabOffset
+        )
+        window.setFrameOrigin(origin)
+        onMoved?(window.frame)
+    }
+}
+
 private final class WebcamFrameOutput: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
@@ -183,13 +209,20 @@ final class WebcamOverlayController {
         window.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
         window.backgroundColor = .clear
         window.isOpaque = false
-        window.ignoresMouseEvents = true
+        // Allow click-and-drag repositioning of the picture-in-picture, like
+        // Windows ZoomIt. The recorder excludes this window from the screen
+        // capture and composites the camera at `recordingFrame`, which is kept
+        // in sync as the overlay is dragged.
+        window.ignoresMouseEvents = false
         window.hasShadow = false
         window.sharingType = .readOnly
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         window.isReleasedWhenClosed = false
 
-        let contentView = NSView(frame: CGRect(origin: .zero, size: frame.size))
+        let contentView = DraggableWebcamView(frame: CGRect(origin: .zero, size: frame.size))
+        contentView.onMoved = { [weak self] newFrame in
+            self?.recordingFrame = newFrame
+        }
         contentView.wantsLayer = true
         previewLayer.frame = contentView.bounds
         applyShape(shape, to: previewLayer, size: size, bounds: contentView.bounds)
@@ -230,6 +263,12 @@ final class WebcamOverlayController {
     func recordingSnapshot() -> WebcamRecordingFrame? {
         guard let image = frameOutput?.latestFrame(), let recordingFrame else { return nil }
         return WebcamRecordingFrame(image: image, frame: recordingFrame, cornerRadius: recordingCornerRadius)
+    }
+
+    /// Computes the overlay window's new bottom-left screen origin while
+    /// dragging, keeping the point the user grabbed under the cursor.
+    static func draggedWindowOrigin(mouseOnScreen: CGPoint, grabOffset: CGSize) -> CGPoint {
+        CGPoint(x: mouseOnScreen.x - grabOffset.width, y: mouseOnScreen.y - grabOffset.height)
     }
 
     private func applyShape(_ shape: Shape, to layer: CALayer, size: Size, bounds: CGRect) {
