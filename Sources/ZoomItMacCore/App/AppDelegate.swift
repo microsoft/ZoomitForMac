@@ -94,7 +94,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             let config = NSImage.SymbolConfiguration(paletteColors: [.systemRed])
             let image = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "Recording")?
                 .withSymbolConfiguration(config)
-            image?.size = NSSize(width: 18, height: 18)
+            image?.size = NSSize(width: Self.menuBarIconGlyph, height: Self.menuBarIconGlyph)
             button.image = image
         } else {
             button.image = Self.menuBarIcon()
@@ -172,8 +172,31 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// sizes it for the menu bar. As a template image it is tinted by the system
     /// (black on a light menu bar, white on a dark one).
     private static func menuBarIcon() -> NSImage? {
-        guard let image = loadZoomItIcon() else { return nil }
-        image.size = NSSize(width: 18, height: 18)
+        guard let source = loadZoomItIcon() else { return nil }
+        return Self.menuBarImage(from: source)
+    }
+
+    /// The square point size of the menu-bar item's image slot.
+    static let menuBarIconCanvas: CGFloat = 18
+    /// The glyph is drawn smaller than the canvas so ZoomIt's icon carries the
+    /// same interior padding as system menu-bar icons; a full-bleed image made
+    /// it look oversized and misaligned next to them.
+    static let menuBarIconGlyph: CGFloat = 15
+
+    /// Renders `source` centered inside a padded, square template image so it
+    /// matches the size and vertical alignment of other menu-bar icons.
+    static func menuBarImage(from source: NSImage) -> NSImage {
+        let canvas = NSSize(width: menuBarIconCanvas, height: menuBarIconCanvas)
+        let image = NSImage(size: canvas)
+        image.lockFocus()
+        let rect = NSRect(
+            x: (canvas.width - menuBarIconGlyph) / 2,
+            y: (canvas.height - menuBarIconGlyph) / 2,
+            width: menuBarIconGlyph,
+            height: menuBarIconGlyph
+        )
+        source.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+        image.unlockFocus()
         image.isTemplate = true
         return image
     }

@@ -57,6 +57,7 @@ public enum SelfTestRunner {
         try testZoomAndLiveZoomAreSeparateTabs()
         try testBlankScreenUsesControlKeys()
         try testTypeTabFontSampleUsesSelectedFont()
+        try testMenuBarIconIsPaddedTemplate()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -655,6 +656,40 @@ public enum SelfTestRunner {
         try expect(big.pointSize <= 36, "Expected large font preview to clamp to 36pt, got \(big.pointSize)")
         let small = SettingsWindowController.fontSamplePreviewFont(name: "Courier", size: 4)
         try expect(small.pointSize >= 12, "Expected small font preview to clamp to 12pt, got \(small.pointSize)")
+    }
+
+    /// The menu-bar icon was a full-bleed image, making it look larger than and
+    /// misaligned with system icons. It must now render into a padded, square
+    /// template image so the glyph carries interior padding and stays centered.
+    private static func testMenuBarIconIsPaddedTemplate() throws {
+        // A fully-filled opaque source glyph (edge to edge).
+        let dim = 32
+        let source = NSImage(size: NSSize(width: dim, height: dim))
+        source.lockFocus()
+        NSColor.black.setFill()
+        NSRect(x: 0, y: 0, width: dim, height: dim).fill()
+        source.unlockFocus()
+
+        let icon = AppDelegate.menuBarImage(from: source)
+        try expect(icon.isTemplate, "Expected the menu-bar icon to be a template image so it tints with the menu bar")
+        try expect(icon.size == NSSize(width: AppDelegate.menuBarIconCanvas, height: AppDelegate.menuBarIconCanvas),
+                   "Expected the menu-bar icon to use the padded canvas size, got \(icon.size)")
+        // The glyph must be inset (smaller than the canvas), giving it padding.
+        try expect(AppDelegate.menuBarIconGlyph < AppDelegate.menuBarIconCanvas,
+                   "Expected the glyph to be inset within the canvas for padding")
+
+        // The canvas corners should be transparent padding even though the
+        // source filled its bounds edge to edge.
+        guard let tiff = icon.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else {
+            throw SelfTestError.failure("Could not rasterize menu-bar icon")
+        }
+        let corner = rep.colorAt(x: 0, y: 0)
+        try expect((corner?.alphaComponent ?? 1) < 0.01,
+                   "Expected the menu-bar icon corner to be transparent padding, got alpha \(corner?.alphaComponent ?? -1)")
+        // The centre should carry the glyph (opaque).
+        let center = rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)
+        try expect((center?.alphaComponent ?? 0) > 0.5,
+                   "Expected the menu-bar icon centre to contain the glyph, got alpha \(center?.alphaComponent ?? -1)")
     }
 
     private static func testBreakTimerLayout() throws {
