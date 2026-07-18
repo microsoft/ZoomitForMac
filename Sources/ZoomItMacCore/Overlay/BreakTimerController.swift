@@ -57,6 +57,16 @@ enum BreakTimerLayout {
         }
         return CGPoint(x: x, y: y)
     }
+
+    /// Draws a background image into the (flipped, top-left origin) break timer
+    /// view. The break timer view uses a flipped coordinate system, which would
+    /// otherwise render images upside down, so this always passes
+    /// `respectFlipped: true` to keep the image right-side up like Windows.
+    @MainActor
+    static func drawBackground(_ image: NSImage, in rect: CGRect, fraction: CGFloat) {
+        image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: fraction,
+                   respectFlipped: true, hints: nil)
+    }
 }
 
 @MainActor
@@ -297,17 +307,19 @@ private final class BreakTimerView: NSView {
     }
 
     private func drawBackgroundImage(_ image: NSImage, in bounds: CGRect) {
+        // This view is flipped (top-left origin), so the image must be drawn
+        // with flip awareness or it renders upside down (matches Windows).
         if settings.breakBackgroundMode == 1 {
-            image.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 0.31)
+            BreakTimerLayout.drawBackground(image, in: bounds, fraction: 0.31)
             return
         }
 
         if settings.breakBackgroundStretch {
-            image.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1)
+            BreakTimerLayout.drawBackground(image, in: bounds, fraction: 1)
         } else {
             let size = image.size
             let origin = CGPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2)
-            image.draw(in: CGRect(origin: origin, size: size), from: .zero, operation: .sourceOver, fraction: 1)
+            BreakTimerLayout.drawBackground(image, in: CGRect(origin: origin, size: size), fraction: 1)
         }
     }
 

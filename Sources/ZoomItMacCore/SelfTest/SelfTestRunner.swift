@@ -10,6 +10,21 @@ enum SelfTestError: Error, CustomStringConvertible {
     }
 }
 
+/// A flipped (top-left origin) host view that draws a background image through
+/// `BreakTimerLayout.drawBackground`, mirroring the real break timer view. Used
+/// to verify images are not rendered upside down in a flipped context.
+private final class FlippedBackgroundHostView: NSView {
+    var image: NSImage?
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.black.setFill()
+        bounds.fill()
+        if let image {
+            BreakTimerLayout.drawBackground(image, in: bounds, fraction: 1)
+        }
+    }
+}
+
 @MainActor
 public enum SelfTestRunner {
     public static func run() throws {
@@ -30,6 +45,7 @@ public enum SelfTestRunner {
         try testDemoTypeTypingDelayRange()
         try testDemoTypeUserDrivenStepStopsAtEnd()
         try testBreakTimerLayout()
+        try testBreakTimerBackgroundNotFlipped()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -350,6 +366,44 @@ public enum SelfTestRunner {
                    "Expected live zoom to exit when zoomed out to 1x")
         try expect(ModeCoordinator.exitsOnZoomOutFloor(mode: .typing),
                    "Expected typing (live zoom sub-mode) to exit when zoomed out to 1x")
+    }
+
+    /// The break timer view uses a flipped coordinate system. Drawing a
+    /// background image there without flip awareness renders it upside down.
+    /// Verify BreakTimerLayout.drawBackground keeps a vertically asymmetric
+    /// image right-side up when drawn through a real flipped view.
+    private static func testBreakTimerBackgroundNotFlipped() throws {
+        let dim = 16
+        // Source image: top half red, bottom half blue in its natural (image)
+        // orientation. NSImage.lockFocus uses a bottom-left origin, so the red
+        // upper half is filled at the higher y range.
+        let source = NSImage(size: NSSize(width: dim, height: dim))
+        source.lockFocus()
+        NSColor.red.setFill()
+        NSRect(x: 0, y: dim / 2, width: dim, height: dim / 2).fill()
+        NSColor.blue.setFill()
+        NSRect(x: 0, y: 0, width: dim, height: dim / 2).fill()
+        source.unlockFocus()
+
+        let host = FlippedBackgroundHostView(frame: NSRect(x: 0, y: 0, width: dim, height: dim))
+        host.image = source
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+            throw SelfTestError.failure("Could not create caching bitmap for flipped host view")
+        }
+        host.cacheDisplay(in: host.bounds, to: rep)
+
+        // Sample in the rep's real pixel space (it may be Retina 2x). Row 0 is
+        // the top of the rendered view. With flip-aware drawing the top of the
+        // image (red) must appear at the top; a regression would show blue there.
+        let midX = rep.pixelsWide / 2
+        guard let top = rep.colorAt(x: midX, y: 1),
+              let bottom = rep.colorAt(x: midX, y: rep.pixelsHigh - 2) else {
+            throw SelfTestError.failure("Could not sample break timer background pixels")
+        }
+        try expect(top.redComponent > 0.5 && top.blueComponent < 0.5,
+                   "Expected break timer background top to stay red (right-side up), got \(top)")
+        try expect(bottom.blueComponent > 0.5 && bottom.redComponent < 0.5,
+                   "Expected break timer background bottom to stay blue (right-side up), got \(bottom)")
     }
 
     private static func testBreakTimerLayout() throws {
