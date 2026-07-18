@@ -241,12 +241,22 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.contentView = container
         window.isReleasedWhenClosed = false
         window.delegate = self
+        Self.configureAlwaysOnTop(window)
 
         // Size the window to fit the (now equal-height) tabs plus the footer.
         container.layoutSubtreeIfNeeded()
         let fitting = container.fittingSize
         window.setContentSize(NSSize(width: max(fitting.width, 480), height: max(fitting.height, 360)))
         return window
+    }
+
+    /// Configures the settings window to behave like the Windows Options dialog:
+    /// it floats above other windows so it can never get lost behind them. If it
+    /// did, ZoomIt's hotkeys (suspended while the dialog is open) would stay
+    /// suspended and the app would appear broken with no obvious way to recover.
+    static func configureAlwaysOnTop(_ window: NSWindow) {
+        window.level = .floating
+        window.hidesOnDeactivate = false
     }
 
     private func makeTabItem(label: String, view: NSView) -> NSTabViewItem {

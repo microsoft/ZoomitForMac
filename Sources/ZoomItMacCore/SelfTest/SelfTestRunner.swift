@@ -53,6 +53,7 @@ public enum SelfTestRunner {
         try testClipTransitionUpdatesOnChange()
         try testWebcamOverlayDragOrigin()
         try testTrimSavePreservesOriginal()
+        try testSettingsWindowStaysOnTop()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -589,6 +590,23 @@ public enum SelfTestRunner {
         let exported = URL(fileURLWithPath: "/tmp/ZoomIt-edit-1234.mp4")
         try expect(RecordingController.trimSaveAction(editedURL: exported, originalURL: original) == .move,
                    "Expected an edited trim save to move the exported temp file")
+    }
+
+    /// The Settings dialog must stay on top like the Windows Options dialog so
+    /// it can't get hidden behind other windows (which would leave ZoomIt's
+    /// hotkeys suspended and the app apparently unresponsive).
+    private static func testSettingsWindowStaysOnTop() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: true
+        )
+        // Sanity: a normal window is at the normal level and hides on deactivate
+        // is off by default; ensure our configuration changes the level.
+        SettingsWindowController.configureAlwaysOnTop(window)
+        try expect(window.level == .floating, "Expected settings window to float above other windows")
+        try expect(window.hidesOnDeactivate == false, "Expected settings window not to hide when the app deactivates")
     }
 
     private static func testBreakTimerLayout() throws {
