@@ -59,6 +59,7 @@ public enum SelfTestRunner {
         try testTypeTabFontSampleUsesSelectedFont()
         try testMenuBarIconIsPaddedTemplate()
         try testStandardIconIsRoundedSquareWithMargin()
+        try testDefaultTypingFontIsSystem20pt()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -728,6 +729,24 @@ public enum SelfTestRunner {
         let center = rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)
         try expect((center?.alphaComponent ?? 0) > 0.5,
                    "Expected standard icon centre to contain artwork, got alpha \(center?.alphaComponent ?? -1)")
+    }
+
+    /// The default typing font should be the default Mac font (an empty font
+    /// name resolves to the system font) at 20pt.
+    private static func testDefaultTypingFontIsSystem20pt() throws {
+        try expect(AppSettings.defaults.typingFontName.isEmpty,
+                   "Expected the default typing font name to be empty (the default Mac system font)")
+        try expect(AppSettings.defaults.typingFontSize == 20,
+                   "Expected the default typing font size to be 20pt, got \(AppSettings.defaults.typingFontSize)")
+        try expect(AnnotationController.defaultFontSize == 20,
+                   "Expected the annotation controller default font size to be 20pt")
+
+        // An empty name resolves to the system font at the requested size.
+        let resolved = AnnotationController.typingFont(named: "", size: 20)
+        let system = NSFont.systemFont(ofSize: 20, weight: .semibold)
+        try expect(resolved.fontName == system.fontName,
+                   "Expected the default typing font to resolve to the system font, got \(resolved.fontName)")
+        try expect(resolved.pointSize == 20, "Expected the default typing font to be 20pt, got \(resolved.pointSize)")
     }
 
     private static func testBreakTimerLayout() throws {
