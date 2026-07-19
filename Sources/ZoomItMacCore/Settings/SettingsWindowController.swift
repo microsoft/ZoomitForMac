@@ -366,6 +366,30 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         return stack
     }
 
+    /// Lays out label/control rows in a grid so the leading labels form a
+    /// right-aligned column and the controls line up in consistent columns.
+    /// Rows may have differing numbers of cells; trailing cells are left empty.
+    private func makeFormGrid(_ rows: [[NSView]], rowSpacing: CGFloat = 10, columnSpacing: CGFloat = 8) -> NSGridView {
+        let grid = NSGridView(views: rows)
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        grid.rowSpacing = rowSpacing
+        grid.columnSpacing = columnSpacing
+        // Center controls vertically within each row so labels line up with
+        // popups, steppers and checkboxes regardless of their heights.
+        grid.rowAlignment = .none
+        for r in 0..<grid.numberOfRows {
+            for c in 0..<grid.numberOfColumns {
+                grid.cell(atColumnIndex: c, rowIndex: r).yPlacement = .center
+            }
+        }
+        if grid.numberOfColumns > 0 {
+            // Right-align the leading label column so the controls in column 1
+            // share a common left edge.
+            grid.column(at: 0).xPlacement = .trailing
+        }
+        return grid
+    }
+
     // MARK: - General tab
 
     private func makeGeneralTab() -> NSView {
@@ -859,21 +883,20 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let durationLabel = makeLabel("")
         breakDurationLabel = durationLabel
         updateBreakDurationLabel()
-        let timerRow = makeRow([makeLabel("Break timer:"), hotKeyButton, makeLabel("Duration:"), durationStepper, durationLabel])
+        let durationControls = makeRow([durationStepper, durationLabel])
 
         let expiredCheck = NSButton(checkboxWithTitle: "Show expired time after 0:00", target: self, action: #selector(breakShowExpiredChanged(_:)))
         expiredCheck.state = settings.breakShowExpiredTime ? .on : .off
 
         let textColorPopup = makeColorPopup(selected: settings.breakTextColorRGB, action: #selector(breakTextColorChanged(_:)))
         let backgroundColorPopup = makeColorPopup(selected: settings.breakBackgroundColorRGB, action: #selector(breakBackgroundColorChanged(_:)))
-        let colorRow = makeRow([makeLabel("Timer color:"), textColorPopup, makeLabel("Background:"), backgroundColorPopup])
 
         let positionPopup = makeIndexedPopup(
             titles: ["Top-left", "Top", "Top-right", "Left", "Center", "Right", "Bottom-left", "Bottom", "Bottom-right"],
             selected: settings.breakTimerPosition,
             action: #selector(breakPositionChanged(_:))
         )
-        positionPopup.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        positionPopup.widthAnchor.constraint(equalToConstant: 150).isActive = true
         let opacityPopup = NSPopUpButton(frame: .zero, pullsDown: false)
         opacityPopup.translatesAutoresizingMaskIntoConstraints = false
         for value in stride(from: 10, through: 100, by: 10) {
@@ -883,16 +906,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         opacityPopup.selectItem(withTitle: "\(min(max(settings.breakOpacity, 10), 100))%")
         opacityPopup.target = self
         opacityPopup.action = #selector(breakOpacityChanged(_:))
-        let layoutRow = makeRow([makeLabel("Position:"), positionPopup, makeLabel("Opacity:"), opacityPopup])
 
         let soundCheck = NSButton(checkboxWithTitle: "Play sound at 0:00", target: self, action: #selector(breakPlaySoundChanged(_:)))
         soundCheck.state = settings.breakPlaySound ? .on : .off
-    let behaviorRow = makeRow([expiredCheck, soundCheck])
         let soundField = makePathField(settings.breakSoundFile)
         breakSoundFileField = soundField
         let soundBrowse = NSButton(title: "Browse…", target: self, action: #selector(chooseBreakSoundFile(_:)))
         soundBrowse.bezelStyle = .rounded
-    let soundFileRow = makeRow([makeLabel("Sound:"), soundField, soundBrowse])
 
         let backgroundModePopup = makeIndexedPopup(
             titles: ["No image", "Faded desktop", "Image file"],
@@ -909,20 +929,25 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let stretchCheck = NSButton(checkboxWithTitle: "Stretch image", target: self, action: #selector(breakBackgroundStretchChanged(_:)))
         stretchCheck.state = settings.breakBackgroundStretch ? .on : .off
         breakBackgroundStretchCheckbox = stretchCheck
-        let backgroundModeRow = makeRow([makeLabel("Background:"), backgroundModePopup, stretchCheck])
-        let backgroundFileRow = makeRow([makeLabel("Image file:"), backgroundField, backgroundBrowse])
+
+        // A single grid keeps every label/control pair in aligned columns:
+        // column 0 = right-aligned labels, column 1 = primary control,
+        // column 2 = secondary label, column 3 = secondary control.
+        let grid = makeFormGrid([
+            [makeLabel("Break timer:"), hotKeyButton, makeLabel("Duration:"), durationControls],
+            [makeLabel("Timer color:"), textColorPopup, makeLabel("Background:"), backgroundColorPopup],
+            [makeLabel("Position:"), positionPopup, makeLabel("Opacity:"), opacityPopup],
+            [makeLabel("Backdrop:"), backgroundModePopup, stretchCheck],
+            [makeLabel("Image file:"), backgroundField, backgroundBrowse],
+            [makeLabel("Sound:"), soundField, soundBrowse]
+        ])
 
         updateBreakBackgroundControlsEnabled()
         return makeColumn([
             help,
-            timerRow,
-            behaviorRow,
-            colorRow,
-            layoutRow,
-            soundFileRow,
-            backgroundModeRow,
-            backgroundFileRow
-        ], spacing: 8)
+            grid,
+            makeRow([expiredCheck, soundCheck])
+        ], spacing: 12)
     }
 
     private func updateBreakDurationLabel() {
