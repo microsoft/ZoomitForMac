@@ -58,6 +58,7 @@ public enum SelfTestRunner {
         try testBlankScreenUsesControlKeys()
         try testTypeTabFontSampleUsesSelectedFont()
         try testMenuBarIconIsPaddedTemplate()
+        try testStandardIconIsRoundedSquareWithMargin()
         try testStaticZoomStaysAtOneX()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
@@ -700,6 +701,33 @@ public enum SelfTestRunner {
         let center = rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)
         try expect((center?.alphaComponent ?? 0) > 0.5,
                    "Expected the menu-bar icon centre to contain the glyph, got alpha \(center?.alphaComponent ?? -1)")
+    }
+
+    /// The permissions-dialog / picker icon must be a standard macOS-style
+    /// rounded square with a margin (the raw artwork is full-bleed edge to
+    /// edge, which looks oversized and misaligns the dialog text). Verify the
+    /// produced icon is square, has transparent margin/corners, and an opaque
+    /// centre.
+    private static func testStandardIconIsRoundedSquareWithMargin() throws {
+        let size: CGFloat = 128
+        guard let icon = ZoomItAppIcon.standardIcon(size: size) else {
+            throw SelfTestError.failure("Expected a standard icon to be produced")
+        }
+        try expect(icon.size == NSSize(width: size, height: size),
+                   "Expected a square standard icon of \(size)pt, got \(icon.size)")
+
+        guard let tiff = icon.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else {
+            throw SelfTestError.failure("Could not rasterize standard icon")
+        }
+        // Corner should be transparent (rounded + margin), unlike the full-bleed
+        // source artwork which reaches every edge.
+        let corner = rep.colorAt(x: 0, y: 0)
+        try expect((corner?.alphaComponent ?? 1) < 0.01,
+                   "Expected standard icon corner to be transparent margin, got alpha \(corner?.alphaComponent ?? -1)")
+        // The centre must carry the artwork.
+        let center = rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)
+        try expect((center?.alphaComponent ?? 0) > 0.5,
+                   "Expected standard icon centre to contain artwork, got alpha \(center?.alphaComponent ?? -1)")
     }
 
     private static func testBreakTimerLayout() throws {
