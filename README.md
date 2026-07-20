@@ -97,6 +97,21 @@ Testers should run the bundled app, not `swift run`. Build a release app bundle:
 zsh Scripts/build-app.sh release
 ```
 
+Local bundles default to version `1.0`. Set `ZOOMIT_VERSION` to stamp a
+specific dotted-numeric version into both `CFBundleShortVersionString` and
+`CFBundleVersion`:
+
+```sh
+ZOOMIT_VERSION=1.2.0 zsh Scripts/build-app.sh release
+defaults read "$PWD/.build/ZoomIt (Dev).app/Contents/Info" CFBundleShortVersionString
+defaults read "$PWD/.build/ZoomIt (Dev).app/Contents/Info" CFBundleVersion
+```
+
+The official Azure DevOps build supplies `ZOOMIT_VERSION` from the version
+entered when the pipeline is queued. Values must contain two or three numeric
+components, such as `1.2` or `1.2.0`; malformed values fail before compilation
+or signing begins.
+
 By default this produces `.build/ZoomIt (Dev).app` with the app icon, bundled resources, and an `Info.plist` declaring the microphone and camera usage descriptions. `release` builds are **Universal** (Apple Silicon + Intel) by default; `debug` builds are native to the build machine for speed. Override the architectures with `ZOOMIT_ARCHS` (e.g. `ZOOMIT_ARCHS=arm64`). A Universal build routes through Xcode's build system, so it requires a **full Xcode** install — with only the Command Line Tools the script warns and falls back to a native build. The build summary prints the resulting architectures.
 
 ### Create and install a local development DMG

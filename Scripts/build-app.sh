@@ -6,6 +6,26 @@ CONFIGURATION="${1:-debug}"
 ICON_SOURCE="$ROOT_DIR/Sources/ZoomItMacCore/Resources/ZoomItColorIcon.png"
 ENTITLEMENTS="$ROOT_DIR/Scripts/ZoomIt.entitlements"
 
+# Local builds default to 1.0 when ZOOMIT_VERSION is absent. An explicitly
+# empty value still fails, which prevents a queued official build from silently
+# using the development default. Restrict the value to dotted numeric
+# components so it is valid for both macOS bundle version keys and cannot
+# inject content into the generated plist.
+VERSION="${ZOOMIT_VERSION-1.0}"
+VERSION_PATTERN='^[0-9]+\.[0-9]+(\.[0-9]+)?$'
+if [[ ! "$VERSION" =~ $VERSION_PATTERN ]]; then
+    echo "error: ZOOMIT_VERSION must be a dotted numeric version such as 1.0 or 1.0.0 (got '$VERSION')." >&2
+    exit 2
+fi
+case "${ZOOMIT_REQUIRE_RELEASE_VERSION:-false}" in
+    true|True|TRUE|1)
+        if [[ "$VERSION" == "0.0.0" ]]; then
+            echo "error: replace the 0.0.0 PR placeholder with the intended release version." >&2
+            exit 2
+        fi
+        ;;
+esac
+
 # Signing identity controls which "flavor" of the app is produced.
 #   - Ad-hoc (the default, "-"): a contributor build that cannot reproduce the
 #     official Developer ID signature. It uses a distinct .dev bundle id so its
@@ -128,9 +148,9 @@ cat > "$APP_PATH/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>$VERSION</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$VERSION</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
@@ -170,5 +190,6 @@ fi
 echo "$APP_PATH"
 echo "  bundle id:    $BUNDLE_ID" >&2
 echo "  display name: $DISPLAY_NAME" >&2
+echo "  version:      $VERSION" >&2
 echo "  signed with:  $SIGN_DESC" >&2
 echo "  architectures: $(lipo -archs "$APP_PATH/Contents/MacOS/ZoomIt" 2>/dev/null || echo unknown)" >&2
