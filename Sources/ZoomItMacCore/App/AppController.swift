@@ -36,6 +36,10 @@ final class AppController: NSObject {
         modeCoordinator.handle(.activateStaticZoom)
     }
 
+    @objc func activateDrawWithoutZoom() {
+        modeCoordinator.handle(.activateDrawWithoutZoom)
+    }
+
     @objc func activateLiveZoom() {
         modeCoordinator.handle(.activateLiveZoom)
     }
@@ -94,6 +98,12 @@ final class AppController: NSObject {
         alert.addButton(withTitle: screenGranted ? "Screen Recording Settings…" : "Grant Screen Recording…")
         alert.addButton(withTitle: micStatus == .notDetermined ? "Grant Microphone…" : "Microphone Settings…")
         alert.addButton(withTitle: camStatus == .notDetermined ? "Grant Camera…" : "Camera Settings…")
+        // Use a standard macOS-style rounded-square icon so the dialog matches
+        // the look of system permission prompts and the icon top lines up with
+        // the message text.
+        if let icon = ZoomItAppIcon.standardIcon() {
+            alert.icon = icon
+        }
         alert.window.animationBehavior = .none
         NSApp.activate(ignoringOtherApps: true)
 

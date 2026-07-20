@@ -62,6 +62,10 @@ final class CrosshairCursorLease {
 @MainActor
 final class SnipSelectionView: NSView {
     private let image: CGImage
+    /// Colour of the selection rectangle border. Defaults to white (snip/record
+    /// selectors); the panorama selector uses blue to stay distinct from the
+    /// orange screen-recording border.
+    private let borderColor: NSColor
     /// Called with the selected rectangle in view points (top-left origin), or
     /// nil if the selection was cancelled or empty.
     var onComplete: ((CGRect?) -> Void)?
@@ -69,8 +73,9 @@ final class SnipSelectionView: NSView {
     private var anchorPoint: CGPoint?
     private var selectionRect: CGRect = .zero
 
-    init(frame frameRect: CGRect, image: CGImage) {
+    init(frame frameRect: CGRect, image: CGImage, borderColor: NSColor = .white) {
         self.image = image
+        self.borderColor = borderColor
         super.init(frame: frameRect)
     }
 
@@ -127,7 +132,7 @@ final class SnipSelectionView: NSView {
         drawImage(in: context)
         context.restoreGState()
 
-        context.setStrokeColor(NSColor.white.cgColor)
+        context.setStrokeColor(borderColor.cgColor)
         context.setLineWidth(1)
         context.stroke(selectionRect.insetBy(dx: 0.5, dy: 0.5))
     }
@@ -169,6 +174,15 @@ final class SnipSelectionView: NSView {
         if event.keyCode == 53 { // Escape cancels.
             onComplete?(nil)
         }
+    }
+
+    /// Renders the selector with a fixed selection rectangle into a bitmap so
+    /// tests can inspect the border colour without synthesizing mouse events.
+    func renderForTesting(selection: CGRect) -> NSBitmapImageRep? {
+        selectionRect = selection
+        guard let rep = bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
+        cacheDisplay(in: bounds, to: rep)
+        return rep
     }
 }
 

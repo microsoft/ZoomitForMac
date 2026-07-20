@@ -395,6 +395,30 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         let index = transitionPopup.indexOfSelectedItem
         guard Transition.allCases.indices.contains(index) else { return }
         selectedTransition = Transition.allCases[index]
+        // The popup is a single global control. Apply the newly chosen
+        // transition to the existing append boundaries and rebuild the preview
+        // so switching (e.g. Fade to Black -> Fade to White) takes effect
+        // immediately instead of keeping the transition captured at append time.
+        guard !joinTransitions.isEmpty else { return }
+        let isAppendJoin = joinKinds.map { kind -> Bool in
+            if case .append = kind { return true }
+            return false
+        }
+        let updated = Self.updatedJoinTransitions(current: joinTransitions,
+                                                  isAppendJoin: isAppendJoin,
+                                                  newTransition: selectedTransition)
+        guard updated != joinTransitions else { return }
+        pushUndoSnapshot()
+        joinTransitions = updated
+        rebuildPlayer()
+        syncTimeline()
+    }
+
+    /// Recomputes join transitions when the (global) transition popup changes:
+    /// every append boundary adopts the newly chosen transition, while
+    /// delete-seam joins keep their existing transition.
+    static func updatedJoinTransitions(current: [Transition], isAppendJoin: [Bool], newTransition: Transition) -> [Transition] {
+        zip(current, isAppendJoin).map { $0.1 ? newTransition : $0.0 }
     }
 
     private func syncDeleteButton() {

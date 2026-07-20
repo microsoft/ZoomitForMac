@@ -37,9 +37,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
 
-    // Draw tab controls that need live updates.
-    private weak var penWidthLabel: NSTextField?
-
     // Type tab controls.
     private weak var fontSampleLabel: NSTextField?
 
@@ -150,22 +147,37 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     // MARK: - Window construction
 
+    /// The Options dialog tabs, in order. Zoom and Live Zoom are separate tabs
+    /// (matching Windows ZoomIt, whose Zoom tab holds static-zoom settings only).
+    static let settingsTabTitles = [
+        "General", "Zoom", "Live Zoom", "Draw", "Type",
+        "DemoType", "Break", "Snip", "Record", "Panorama"
+    ]
+
+    private func viewForTab(_ title: String) -> NSView {
+        switch title {
+        case "General": return makeGeneralTab()
+        case "Zoom": return makeZoomTab()
+        case "Live Zoom": return makeLiveZoomTab()
+        case "Draw": return makeDrawTab()
+        case "Type": return makeTypeTab()
+        case "DemoType": return makeDemoTypeTab()
+        case "Break": return makeBreakTab()
+        case "Snip": return makeSnipTab()
+        case "Record": return makeRecordTab()
+        case "Panorama": return makePanoramaTab()
+        default: return NSView()
+        }
+    }
+
     private func makeWindow() -> NSWindow {
         // Build each tab's content and measure the tallest one so every tab can
         // share a single height. Equal-height tabs keep the tab view a constant
         // size, which in turn keeps the footer anchored near the bottom no
         // matter which tab is selected.
-        let tabs: [(String, NSView)] = [
-            ("General", makeGeneralTab()),
-            ("Zoom", makeZoomTab()),
-            ("Draw", makeDrawTab()),
-            ("Type", makeTypeTab()),
-            ("DemoType", makeDemoTypeTab()),
-            ("Break", makeBreakTab()),
-            ("Snip", makeSnipTab()),
-            ("Record", makeRecordTab()),
-            ("Panorama", makePanoramaTab())
-        ]
+        let tabs: [(String, NSView)] = Self.settingsTabTitles.map { title in
+            (title, viewForTab(title))
+        }
 
         var maxContentHeight: CGFloat = 0
         for (_, content) in tabs {
@@ -241,12 +253,22 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.contentView = container
         window.isReleasedWhenClosed = false
         window.delegate = self
+        Self.configureAlwaysOnTop(window)
 
         // Size the window to fit the (now equal-height) tabs plus the footer.
         container.layoutSubtreeIfNeeded()
         let fitting = container.fittingSize
         window.setContentSize(NSSize(width: max(fitting.width, 480), height: max(fitting.height, 360)))
         return window
+    }
+
+    /// Configures the settings window to behave like the Windows Options dialog:
+    /// it floats above other windows so it can never get lost behind them. If it
+    /// did, ZoomIt's hotkeys (suspended while the dialog is open) would stay
+    /// suspended and the app would appear broken with no obvious way to recover.
+    static func configureAlwaysOnTop(_ window: NSWindow) {
+        window.level = .floating
+        window.hidesOnDeactivate = false
     }
 
     private func makeTabItem(label: String, view: NSView) -> NSTabViewItem {
@@ -344,6 +366,30 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         return stack
     }
 
+    /// Lays out label/control rows in a grid so the leading labels form a
+    /// right-aligned column and the controls line up in consistent columns.
+    /// Rows may have differing numbers of cells; trailing cells are left empty.
+    private func makeFormGrid(_ rows: [[NSView]], rowSpacing: CGFloat = 10, columnSpacing: CGFloat = 8) -> NSGridView {
+        let grid = NSGridView(views: rows)
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        grid.rowSpacing = rowSpacing
+        grid.columnSpacing = columnSpacing
+        // Center controls vertically within each row so labels line up with
+        // popups, steppers and checkboxes regardless of their heights.
+        grid.rowAlignment = .none
+        for r in 0..<grid.numberOfRows {
+            for c in 0..<grid.numberOfColumns {
+                grid.cell(atColumnIndex: c, rowIndex: r).yPlacement = .center
+            }
+        }
+        if grid.numberOfColumns > 0 {
+            // Right-align the leading label column so the controls in column 1
+            // share a common left edge.
+            grid.column(at: 0).xPlacement = .trailing
+        }
+        return grid
+    }
+
     // MARK: - General tab
 
     private func makeGeneralTab() -> NSView {
@@ -393,18 +439,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.hotKeyButton = hotKeyButton
         let hotKeyRow = makeRow([makeLabel("Zoom toggle:"), hotKeyButton])
 
-        let liveHelp = makeLabel(
-            "Live zoom magnifies the live screen so motion and updates stay visible while zoomed. Use the same zoom and pan controls.",
-            wraps: true
-        )
-
-        let liveHotKeyButton = NSButton(title: liveHotKeyDisplayString(), target: self, action: #selector(toggleLiveHotKeyRecording(_:)))
-        liveHotKeyButton.bezelStyle = .rounded
-        liveHotKeyButton.setButtonType(.momentaryPushIn)
-        liveHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
-        self.liveHotKeyButton = liveHotKeyButton
-        let liveHotKeyRow = makeRow([makeLabel("Live zoom toggle:"), liveHotKeyButton])
-
         let magHelp = makeLabel("Specify the initial level of magnification when zooming in:", wraps: true)
 
         let magPopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -426,7 +460,27 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let smoothCheck = NSButton(checkboxWithTitle: "Smooth zoomed image", target: self, action: #selector(smoothImageChanged(_:)))
         smoothCheck.state = settings.smoothImage ? .on : .off
 
-        return makeColumn([help, hotKeyRow, liveHelp, liveHotKeyRow, magHelp, magRow, animateCheck, smoothCheck])
+        return makeColumn([help, hotKeyRow, magHelp, magRow, animateCheck, smoothCheck])
+    }
+
+    // MARK: - Live Zoom tab
+
+    /// Live zoom lives on its own tab so the Zoom tab holds only static-zoom
+    /// settings, matching the Windows ZoomIt options dialog.
+    private func makeLiveZoomTab() -> NSView {
+        let liveHelp = makeLabel(
+            "Live zoom magnifies the live screen so motion and updates stay visible while zoomed. Use the same zoom and pan controls.",
+            wraps: true
+        )
+
+        let liveHotKeyButton = NSButton(title: liveHotKeyDisplayString(), target: self, action: #selector(toggleLiveHotKeyRecording(_:)))
+        liveHotKeyButton.bezelStyle = .rounded
+        liveHotKeyButton.setButtonType(.momentaryPushIn)
+        liveHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+        self.liveHotKeyButton = liveHotKeyButton
+        let liveHotKeyRow = makeRow([makeLabel("Live zoom toggle:"), liveHotKeyButton])
+
+        return makeColumn([liveHelp, liveHotKeyRow])
     }
 
     @objc private func zoomLevelChanged(_ sender: NSPopUpButton) {
@@ -754,19 +808,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let screenSection = makeSectionLabel("Screen")
         let screenHelp = makeLabel(
-            "Press W or K to blank the screen white or black as a sketch pad.",
+            "Press Ctrl+W or Ctrl+K to blank the screen white or black as a sketch pad.",
             wraps: true
         )
-
-        let slider = NSSlider(value: Double(settings.rootPenWidth), minValue: 1, maxValue: 20, target: self, action: #selector(penWidthChanged(_:)))
-        slider.translatesAutoresizingMaskIntoConstraints = false
-        slider.numberOfTickMarks = 20
-        slider.allowsTickMarkValuesOnly = true
-        slider.widthAnchor.constraint(equalToConstant: 200).isActive = true
-
-        let widthValue = makeLabel("\(Int(settings.rootPenWidth))")
-        penWidthLabel = widthValue
-        let widthRow = makeRow([makeLabel("Default pen width:"), slider, widthValue])
 
         let drawHotKeyButton = NSButton(title: drawHotKeyDisplayString(), target: self, action: #selector(toggleDrawHotKeyRecording(_:)))
         drawHotKeyButton.bezelStyle = .rounded
@@ -778,7 +822,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         return makeColumn([
             help,
             penSection,
-            makeIndentedColumn([penHelp, widthRow]),
+            makeIndentedColumn([penHelp]),
             colorsSection,
             makeIndentedColumn([colorsHelp]),
             highlightSection,
@@ -789,12 +833,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             makeIndentedColumn([screenHelp]),
             drawHotKeyRow
         ], spacing: 6)
-    }
-
-    @objc private func penWidthChanged(_ sender: NSSlider) {
-        settings.rootPenWidth = CGFloat(sender.intValue)
-        penWidthLabel?.stringValue = "\(sender.intValue)"
-        persist()
     }
 
     // MARK: - Type tab
@@ -845,21 +883,20 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let durationLabel = makeLabel("")
         breakDurationLabel = durationLabel
         updateBreakDurationLabel()
-        let timerRow = makeRow([makeLabel("Break timer:"), hotKeyButton, makeLabel("Duration:"), durationStepper, durationLabel])
+        let durationControls = makeRow([durationStepper, durationLabel])
 
         let expiredCheck = NSButton(checkboxWithTitle: "Show expired time after 0:00", target: self, action: #selector(breakShowExpiredChanged(_:)))
         expiredCheck.state = settings.breakShowExpiredTime ? .on : .off
 
         let textColorPopup = makeColorPopup(selected: settings.breakTextColorRGB, action: #selector(breakTextColorChanged(_:)))
         let backgroundColorPopup = makeColorPopup(selected: settings.breakBackgroundColorRGB, action: #selector(breakBackgroundColorChanged(_:)))
-        let colorRow = makeRow([makeLabel("Timer color:"), textColorPopup, makeLabel("Background:"), backgroundColorPopup])
 
         let positionPopup = makeIndexedPopup(
             titles: ["Top-left", "Top", "Top-right", "Left", "Center", "Right", "Bottom-left", "Bottom", "Bottom-right"],
             selected: settings.breakTimerPosition,
             action: #selector(breakPositionChanged(_:))
         )
-        positionPopup.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        positionPopup.widthAnchor.constraint(equalToConstant: 150).isActive = true
         let opacityPopup = NSPopUpButton(frame: .zero, pullsDown: false)
         opacityPopup.translatesAutoresizingMaskIntoConstraints = false
         for value in stride(from: 10, through: 100, by: 10) {
@@ -869,16 +906,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         opacityPopup.selectItem(withTitle: "\(min(max(settings.breakOpacity, 10), 100))%")
         opacityPopup.target = self
         opacityPopup.action = #selector(breakOpacityChanged(_:))
-        let layoutRow = makeRow([makeLabel("Position:"), positionPopup, makeLabel("Opacity:"), opacityPopup])
 
         let soundCheck = NSButton(checkboxWithTitle: "Play sound at 0:00", target: self, action: #selector(breakPlaySoundChanged(_:)))
         soundCheck.state = settings.breakPlaySound ? .on : .off
-    let behaviorRow = makeRow([expiredCheck, soundCheck])
         let soundField = makePathField(settings.breakSoundFile)
         breakSoundFileField = soundField
         let soundBrowse = NSButton(title: "Browse…", target: self, action: #selector(chooseBreakSoundFile(_:)))
         soundBrowse.bezelStyle = .rounded
-    let soundFileRow = makeRow([makeLabel("Sound:"), soundField, soundBrowse])
 
         let backgroundModePopup = makeIndexedPopup(
             titles: ["No image", "Faded desktop", "Image file"],
@@ -895,20 +929,25 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let stretchCheck = NSButton(checkboxWithTitle: "Stretch image", target: self, action: #selector(breakBackgroundStretchChanged(_:)))
         stretchCheck.state = settings.breakBackgroundStretch ? .on : .off
         breakBackgroundStretchCheckbox = stretchCheck
-        let backgroundModeRow = makeRow([makeLabel("Background:"), backgroundModePopup, stretchCheck])
-        let backgroundFileRow = makeRow([makeLabel("Image file:"), backgroundField, backgroundBrowse])
+
+        // A single grid keeps every label/control pair in aligned columns:
+        // column 0 = right-aligned labels, column 1 = primary control,
+        // column 2 = secondary label, column 3 = secondary control.
+        let grid = makeFormGrid([
+            [makeLabel("Break timer:"), hotKeyButton, makeLabel("Duration:"), durationControls],
+            [makeLabel("Timer color:"), textColorPopup, makeLabel("Background:"), backgroundColorPopup],
+            [makeLabel("Position:"), positionPopup, makeLabel("Opacity:"), opacityPopup],
+            [makeLabel("Backdrop:"), backgroundModePopup, stretchCheck],
+            [makeLabel("Image file:"), backgroundField, backgroundBrowse],
+            [makeLabel("Sound:"), soundField, soundBrowse]
+        ])
 
         updateBreakBackgroundControlsEnabled()
         return makeColumn([
             help,
-            timerRow,
-            behaviorRow,
-            colorRow,
-            layoutRow,
-            soundFileRow,
-            backgroundModeRow,
-            backgroundFileRow
-        ], spacing: 8)
+            grid,
+            makeRow([expiredCheck, soundCheck])
+        ], spacing: 12)
     }
 
     private func updateBreakDurationLabel() {
@@ -1375,9 +1414,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func updateFontSample() {
-        let font = currentTypingFont()
-        fontSampleLabel?.font = NSFont.systemFont(ofSize: 18)
+        let font = Self.fontSamplePreviewFont(name: settings.typingFontName, size: settings.typingFontSize)
+        // Render the sample in the actually-selected font so choosing a new font
+        // is reflected immediately (it previously always used the system font).
+        fontSampleLabel?.font = font
         fontSampleLabel?.stringValue = "Sample — \(font.displayName ?? font.fontName) \(Int(settings.typingFontSize))pt"
+    }
+
+    /// Font used for the Type tab's live "Sample" preview. Uses the selected
+    /// typing font, clamped to a legible on-screen preview size.
+    static func fontSamplePreviewFont(name: String, size: CGFloat) -> NSFont {
+        let previewSize = min(max(size, 12), 36)
+        return AnnotationController.typingFont(named: name, size: previewSize)
     }
 
     @objc private func selectFont(_ sender: NSButton) {

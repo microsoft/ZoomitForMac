@@ -116,7 +116,7 @@ struct AppSettings: Equatable {
         smoothImage: true,
         launchAtLogin: false,
         typingFontName: "",
-        typingFontSize: 36,
+        typingFontSize: 20,
         // Control+1 (kVK_ANSI_1 = 18, NSEvent.ModifierFlags.control = 1 << 18).
         hotKeyCode: 18,
         hotKeyModifiers: 1 << 18,
