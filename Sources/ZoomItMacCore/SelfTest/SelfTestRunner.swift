@@ -743,9 +743,9 @@ public enum SelfTestRunner {
 
         // An empty name resolves to the system font at the requested size.
         let resolved = AnnotationController.typingFont(named: "", size: 20)
-        let system = NSFont.systemFont(ofSize: 20, weight: .semibold)
+        let system = NSFont.systemFont(ofSize: 20, weight: .regular)
         try expect(resolved.fontName == system.fontName,
-                   "Expected the default typing font to resolve to the system font, got \(resolved.fontName)")
+                   "Expected the default typing font to resolve to the regular (non-bold) system font, got \(resolved.fontName)")
         try expect(resolved.pointSize == 20, "Expected the default typing font to be 20pt, got \(resolved.pointSize)")
     }
 

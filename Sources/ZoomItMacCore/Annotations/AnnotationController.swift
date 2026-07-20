@@ -32,7 +32,7 @@ final class AnnotationController {
         if !name.isEmpty, let font = NSFont(name: name, size: size) {
             return font
         }
-        return NSFont.systemFont(ofSize: size, weight: .semibold)
+        return NSFont.systemFont(ofSize: size, weight: .regular)
     }
 
     func reset() {
