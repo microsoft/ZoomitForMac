@@ -1,10 +1,10 @@
 import AppKit
 @preconcurrency import ScreenCaptureKit
 
-/// Draws a yellow capture border plus an instruction banner around the panorama
+/// Draws a blue capture border plus an instruction banner around the panorama
 /// region. It lives in a click-through, non-shareable window so it never
-/// appears in the captured frames (mirroring the Windows excluded-from-capture
-/// SelectRectangle border, which is yellow).
+/// appears in the captured frames. Blue keeps it distinct from the orange
+/// screen-recording border.
 @MainActor
 private final class PanoramaBorderView: NSView {
     override var isFlipped: Bool { true }
@@ -13,7 +13,7 @@ private final class PanoramaBorderView: NSView {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         let lineWidth: CGFloat = 4
         let rect = bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2)
-        context.setStrokeColor(NSColor.yellow.cgColor)
+        context.setStrokeColor(NSColor.systemBlue.cgColor)
         context.setLineWidth(lineWidth)
         context.stroke(rect)
     }
@@ -161,7 +161,7 @@ final class PanoramaController {
             let view = SnipSelectionView(
                 frame: CGRect(origin: .zero, size: display.frame.size),
                 image: frame.image,
-                borderColor: .yellow
+                borderColor: .systemBlue
             )
             var holder: NSWindow? = window
             var cursorLease: CrosshairCursorLease?
@@ -405,7 +405,7 @@ final class PanoramaController {
     }
 
     private func makeBorderContainer(displaySize: CGSize, region: CGRect) -> NSView {
-        // A flipped container so the yellow border lines up with the top-left
+        // A flipped container so the blue border lines up with the top-left
         // origin rectangle reported by the selection view.
         final class FlippedContainer: NSView { override var isFlipped: Bool { true } }
         let container = FlippedContainer(frame: CGRect(origin: .zero, size: displaySize))

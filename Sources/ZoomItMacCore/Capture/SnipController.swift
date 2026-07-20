@@ -63,7 +63,8 @@ final class CrosshairCursorLease {
 final class SnipSelectionView: NSView {
     private let image: CGImage
     /// Colour of the selection rectangle border. Defaults to white (snip/record
-    /// selectors); the panorama selector uses yellow to match Windows ZoomIt.
+    /// selectors); the panorama selector uses blue to stay distinct from the
+    /// orange screen-recording border.
     private let borderColor: NSColor
     /// Called with the selected rectangle in view points (top-left origin), or
     /// nil if the selection was cancelled or empty.

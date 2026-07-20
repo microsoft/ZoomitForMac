@@ -420,9 +420,10 @@ public enum SelfTestRunner {
                    "Expected break timer background bottom to stay blue (right-side up), got \(bottom)")
     }
 
-    /// Windows ZoomIt draws the panorama region rectangle in yellow. The shared
-    /// selection view defaults to white (snip/record) but the panorama selector
-    /// requests yellow; verify the requested border colour is actually rendered.
+    /// The panorama region rectangle is drawn in blue to stay distinct from the
+    /// orange screen-recording border. The shared selection view defaults to
+    /// white (snip/record) but the panorama selector requests blue; verify the
+    /// requested border colour is actually rendered.
     private static func testPanoramaSelectionBorderColor() throws {
         let dim = 40
         // A solid grey backing image for the selector.
@@ -440,7 +441,7 @@ public enum SelfTestRunner {
 
         let selection = CGRect(x: 8, y: 8, width: 24, height: 24)
 
-        func borderIsYellow(_ view: SnipSelectionView) throws -> Bool {
+        func borderIsBlue(_ view: SnipSelectionView) throws -> Bool {
             guard let rep = view.renderForTesting(selection: selection) else {
                 throw SelfTestError.failure("Selector render returned no bitmap")
             }
@@ -452,14 +453,14 @@ public enum SelfTestRunner {
             guard let c = rep.colorAt(x: px, y: py) else {
                 throw SelfTestError.failure("Could not sample selector border pixel")
             }
-            return c.redComponent > 0.5 && c.greenComponent > 0.5 && c.blueComponent < 0.4
+            return c.blueComponent > 0.5 && c.redComponent < 0.4
         }
 
-        let yellowView = SnipSelectionView(frame: CGRect(x: 0, y: 0, width: dim, height: dim), image: image, borderColor: .yellow)
-        try expect(try borderIsYellow(yellowView), "Expected panorama selection border to render yellow")
+        let blueView = SnipSelectionView(frame: CGRect(x: 0, y: 0, width: dim, height: dim), image: image, borderColor: .systemBlue)
+        try expect(try borderIsBlue(blueView), "Expected panorama selection border to render blue")
 
         let whiteView = SnipSelectionView(frame: CGRect(x: 0, y: 0, width: dim, height: dim), image: image)
-        try expect(try !borderIsYellow(whiteView), "Expected default snip selection border to remain non-yellow (white)")
+        try expect(try !borderIsBlue(whiteView), "Expected default snip selection border to remain non-blue (white)")
     }
 
     /// Escape during the scrolling panorama capture must cancel the run, but
