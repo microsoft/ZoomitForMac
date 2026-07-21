@@ -413,7 +413,7 @@ final class ZoomCanvasView: NSView {
                 handleVerticalArrow(up: false, shift: event.modifierFlags.contains(.shift))
             }
         case 6 where event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control):
-            // Ctrl+Z (matching Windows ZoomIt) or ⌘Z undoes the last gesture.
+            // ⌘Z (macOS convention) or Ctrl+Z (matching Windows ZoomIt) undoes the last gesture.
             commandSink(.undo)
         case 1 where event.modifierFlags.contains(.command):
             // ⌘S saves the whole zoomed viewport (matching ZoomIt's Ctrl+S).
