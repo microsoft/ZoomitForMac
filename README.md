@@ -4,7 +4,7 @@ Sysinternals ZoomIt for Mac is a macOS menu-bar utility modeled after Sysinterna
 
 ## Install
 
-Install ZoomIt from the [Homebrew Sysinternals tap](https://github.com/microsoft/homebrew-sysinternalstap):
+Install Sysinternals ZoomIt from the [Homebrew Sysinternals tap](https://github.com/microsoft/homebrew-sysinternalstap):
 
 ```sh
 brew install --cask microsoft/sysinternalstap/zoomit
@@ -16,7 +16,13 @@ If the tap is already configured, the shorter form also works:
 brew install --cask zoomit
 ```
 
-ZoomIt requires macOS 14 Sonoma or newer. It runs in the menu bar and requests Screen Recording permission when a capture feature is first used.
+## Uninstall
+
+Uninstall ZoomIt with Homebrew:
+
+```sh
+brew uninstall --cask zoomit
+```
 
 ## Features
 
