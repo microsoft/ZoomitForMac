@@ -28,6 +28,7 @@ private final class FlippedBackgroundHostView: NSView {
 @MainActor
 public enum SelfTestRunner {
     public static func run() throws {
+        try testAppInfoVersionResolution()
         try testViewportClampsZoom()
         try testViewportZoomAnimation()
         try testViewportSourceRect()
@@ -75,6 +76,21 @@ public enum SelfTestRunner {
         try testPanoramaSparseTallContentStitches()
         try testPanoramaStartupAxisRejectsHorizontalAlias()
         try testPanoramaLockedAxisRejectsShortFallback()
+    }
+
+    private static func testAppInfoVersionResolution() throws {
+        try expect(
+            AppInfo.resolveVersion(from: ["CFBundleShortVersionString": "12.2.0"]) == "12.2.0",
+            "Expected the settings version to use CFBundleShortVersionString"
+        )
+        try expect(
+            AppInfo.resolveVersion(from: ["CFBundleVersion": "42"]) == "42",
+            "Expected the settings version to fall back to CFBundleVersion"
+        )
+        try expect(
+            AppInfo.resolveVersion(from: nil) == "Development",
+            "Expected an unbundled development build to identify itself as Development"
+        )
     }
 
     private static func testViewportClampsZoom() throws {
