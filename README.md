@@ -2,6 +2,28 @@
 
 Sysinternals ZoomIt for Mac is a macOS menu-bar utility modeled after Sysinternals ZoomIt. It provides screen zoom, live zoom, drawing and typing annotations, screenshots, snips, recording, webcam picture-in-picture, and scrolling panorama capture.
 
+## Install
+
+Install Sysinternals ZoomIt from the [Homebrew Sysinternals tap](https://github.com/microsoft/homebrew-sysinternalstap):
+
+```sh
+brew install --cask microsoft/sysinternalstap/zoomit
+```
+
+If the tap is already configured, the shorter form also works:
+
+```sh
+brew install --cask zoomit
+```
+
+## Uninstall
+
+Uninstall ZoomIt with Homebrew:
+
+```sh
+brew uninstall --cask zoomit
+```
+
 ## Features
 
 - Static zoom over a frozen ScreenCaptureKit display capture.
