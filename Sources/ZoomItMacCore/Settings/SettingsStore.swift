@@ -238,6 +238,7 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let copySnipToClipboardOnSave = "copySnipToClipboardOnSave"
         static let saveSnipToDirectory = "saveSnipToDirectory"
         static let snipSaveDirectory = "snipSaveDirectory"
+        static let hasCompletedFirstLaunch = "hasCompletedFirstLaunch"
     }
 
     private let defaults: UserDefaults
@@ -248,6 +249,32 @@ final class UserDefaultsSettingsStore: SettingsStore {
 
     var hasLaunchAtLoginPreference: Bool {
         defaults.object(forKey: Key.launchAtLogin) != nil
+    }
+
+    /// Default key AppKit used to persist the status-item slot in builds that set
+    /// an `autosaveName`. It reliably indicates the app has run before, so it
+    /// doubles as a first-launch migration sentinel for upgrading users even
+    /// though current builds no longer set it.
+    private static let legacyStatusItemPositionKey =
+        "NSStatusItem Preferred Position com.sysinternals.ZoomIt.statusItem"
+
+    /// True once the app has run at least once. Used to show the Settings dialog
+    /// on a fresh install so the user has a clear entry point instead of a silent
+    /// menu-bar-only launch. Upgrading users who predate this flag are detected
+    /// via any pre-existing ZoomIt preference so they don't get an unexpected
+    /// Settings pop-up on their first run of a new build.
+    var hasCompletedFirstLaunch: Bool {
+        if defaults.bool(forKey: Key.hasCompletedFirstLaunch) { return true }
+        return hasAnyExistingPreference
+    }
+
+    private var hasAnyExistingPreference: Bool {
+        defaults.object(forKey: Self.legacyStatusItemPositionKey) != nil ||
+            defaults.object(forKey: Key.launchAtLogin) != nil
+    }
+
+    func markFirstLaunchCompleted() {
+        defaults.set(true, forKey: Key.hasCompletedFirstLaunch)
     }
 
     func load() -> AppSettings {
