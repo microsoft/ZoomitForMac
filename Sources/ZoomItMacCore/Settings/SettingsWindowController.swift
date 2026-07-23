@@ -357,6 +357,27 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         return stack
     }
 
+    /// Creates a checkbox styled like the Windows ZoomIt options dialog, where
+    /// the caption sits to the left of the box (BS_LEFTTEXT). Grouping several
+    /// of these in a `makeCheckboxColumn` lines their boxes up in a single
+    /// right-hand column, matching the Windows layout.
+    private func makeCheckbox(_ title: String, action: Selector, state: Bool) -> NSButton {
+        let button = NSButton(checkboxWithTitle: title, target: self, action: action)
+        button.imagePosition = .imageRight
+        button.state = state ? .on : .off
+        return button
+    }
+
+    /// Stacks Windows-style checkboxes so their boxes align in a right-hand
+    /// column, the way the ZoomIt options dialog aligns them.
+    private func makeCheckboxColumn(_ checkboxes: [NSView], spacing: CGFloat = 6) -> NSView {
+        let stack = NSStackView(views: checkboxes)
+        stack.orientation = .vertical
+        stack.alignment = .trailing
+        stack.spacing = spacing
+        return stack
+    }
+
     private func makeIndentedColumn(_ rows: [NSView], indent: CGFloat = 18, spacing: CGFloat = 6) -> NSView {
         let stack = NSStackView(views: rows)
         stack.orientation = .vertical
@@ -437,7 +458,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         hotKeyButton.setButtonType(.momentaryPushIn)
         hotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
         self.hotKeyButton = hotKeyButton
-        let hotKeyRow = makeRow([makeLabel("Zoom toggle:"), hotKeyButton])
+        let hotKeyRow = makeRow([makeLabel("Zoom Toggle:"), hotKeyButton])
 
         let magHelp = makeLabel("Specify the initial level of magnification when zooming in:", wraps: true)
 
@@ -454,13 +475,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         magPopup.action = #selector(zoomLevelChanged(_:))
         let magRow = makeRow([makeLabel("Initial magnification:"), magPopup])
 
-        let animateCheck = NSButton(checkboxWithTitle: "Animate zoom in and zoom out", target: self, action: #selector(animateZoomChanged(_:)))
-        animateCheck.state = settings.animateZoom ? .on : .off
+        let animateCheck = makeCheckbox("Animate zoom in and zoom out:", action: #selector(animateZoomChanged(_:)), state: settings.animateZoom)
+        let smoothCheck = makeCheckbox("Smooth zoomed image:", action: #selector(smoothImageChanged(_:)), state: settings.smoothImage)
 
-        let smoothCheck = NSButton(checkboxWithTitle: "Smooth zoomed image", target: self, action: #selector(smoothImageChanged(_:)))
-        smoothCheck.state = settings.smoothImage ? .on : .off
-
-        return makeColumn([help, hotKeyRow, magHelp, magRow, animateCheck, smoothCheck])
+        return makeColumn([help, hotKeyRow, magHelp, magRow, makeCheckboxColumn([animateCheck, smoothCheck])])
     }
 
     // MARK: - Live Zoom tab
@@ -478,7 +496,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         liveHotKeyButton.setButtonType(.momentaryPushIn)
         liveHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
         self.liveHotKeyButton = liveHotKeyButton
-        let liveHotKeyRow = makeRow([makeLabel("Live zoom toggle:"), liveHotKeyButton])
+        let liveHotKeyRow = makeRow([makeLabel("LiveZoom Toggle:"), liveHotKeyButton])
 
         return makeColumn([liveHelp, liveHotKeyRow])
     }
@@ -817,7 +835,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         drawHotKeyButton.setButtonType(.momentaryPushIn)
         drawHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
         self.drawHotKeyButton = drawHotKeyButton
-        let drawHotKeyRow = makeRow([makeLabel("Draw w/out zoom:"), drawHotKeyButton])
+        let drawHotKeyRow = makeRow([makeLabel("Draw w/out Zoom:"), drawHotKeyButton])
 
         return makeColumn([
             help,
@@ -885,8 +903,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         updateBreakDurationLabel()
         let durationControls = makeRow([durationStepper, durationLabel])
 
-        let expiredCheck = NSButton(checkboxWithTitle: "Show expired time after 0:00", target: self, action: #selector(breakShowExpiredChanged(_:)))
-        expiredCheck.state = settings.breakShowExpiredTime ? .on : .off
+        let expiredCheck = makeCheckbox("Show Time Elapsed After Expiration:", action: #selector(breakShowExpiredChanged(_:)), state: settings.breakShowExpiredTime)
 
         let textColorPopup = makeColorPopup(selected: settings.breakTextColorRGB, action: #selector(breakTextColorChanged(_:)))
         let backgroundColorPopup = makeColorPopup(selected: settings.breakBackgroundColorRGB, action: #selector(breakBackgroundColorChanged(_:)))
@@ -907,8 +924,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         opacityPopup.target = self
         opacityPopup.action = #selector(breakOpacityChanged(_:))
 
-        let soundCheck = NSButton(checkboxWithTitle: "Play sound at 0:00", target: self, action: #selector(breakPlaySoundChanged(_:)))
-        soundCheck.state = settings.breakPlaySound ? .on : .off
+        let soundCheck = makeCheckbox("Play Sound on Expiration:", action: #selector(breakPlaySoundChanged(_:)), state: settings.breakPlaySound)
         let soundField = makePathField(settings.breakSoundFile)
         breakSoundFileField = soundField
         let soundBrowse = NSButton(title: "Browse…", target: self, action: #selector(chooseBreakSoundFile(_:)))
@@ -926,15 +942,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let backgroundBrowse = NSButton(title: "Browse…", target: self, action: #selector(chooseBreakBackgroundFile(_:)))
         backgroundBrowse.bezelStyle = .rounded
         breakBackgroundBrowseButton = backgroundBrowse
-        let stretchCheck = NSButton(checkboxWithTitle: "Stretch image", target: self, action: #selector(breakBackgroundStretchChanged(_:)))
-        stretchCheck.state = settings.breakBackgroundStretch ? .on : .off
+        let stretchCheck = makeCheckbox("Scale to screen:", action: #selector(breakBackgroundStretchChanged(_:)), state: settings.breakBackgroundStretch)
         breakBackgroundStretchCheckbox = stretchCheck
 
         // A single grid keeps every label/control pair in aligned columns:
         // column 0 = right-aligned labels, column 1 = primary control,
         // column 2 = secondary label, column 3 = secondary control.
         let grid = makeFormGrid([
-            [makeLabel("Break timer:"), hotKeyButton, makeLabel("Duration:"), durationControls],
+            [makeLabel("Start Timer:"), hotKeyButton, makeLabel("Duration:"), durationControls],
             [makeLabel("Timer color:"), textColorPopup, makeLabel("Background:"), backgroundColorPopup],
             [makeLabel("Position:"), positionPopup, makeLabel("Opacity:"), opacityPopup],
             [makeLabel("Backdrop:"), backgroundModePopup, stretchCheck],
@@ -946,7 +961,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         return makeColumn([
             help,
             grid,
-            makeRow([expiredCheck, soundCheck])
+            makeCheckboxColumn([expiredCheck, soundCheck])
         ], spacing: 12)
     }
 
@@ -1086,28 +1101,26 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         snipHotKeyButton.setButtonType(.momentaryPushIn)
         snipHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
         self.snipHotKeyButton = snipHotKeyButton
-        let snipHotKeyRow = makeRow([makeLabel("Snip region:"), snipHotKeyButton])
+        let snipHotKeyRow = makeRow([makeLabel("Snip Toggle:"), snipHotKeyButton])
 
         let snipOcrHotKeyButton = NSButton(title: snipOcrHotKeyDisplayString(), target: self, action: #selector(toggleSnipOcrHotKeyRecording(_:)))
         snipOcrHotKeyButton.bezelStyle = .rounded
         snipOcrHotKeyButton.setButtonType(.momentaryPushIn)
         snipOcrHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
         self.snipOcrHotKeyButton = snipOcrHotKeyButton
-        let snipOcrHotKeyRow = makeRow([makeLabel("OCR region to text:"), snipOcrHotKeyButton])
+        let snipOcrHotKeyRow = makeRow([makeLabel("Text Toggle:"), snipOcrHotKeyButton])
 
-        let copyOnSaveCheck = NSButton(
-            checkboxWithTitle: "Also copy to clipboard when saving to a file",
-            target: self,
-            action: #selector(copySnipToClipboardOnSaveChanged(_:))
+        let copyOnSaveCheck = makeCheckbox(
+            "Also copy to clipboard when saving to a file:",
+            action: #selector(copySnipToClipboardOnSaveChanged(_:)),
+            state: settings.copySnipToClipboardOnSave
         )
-        copyOnSaveCheck.state = settings.copySnipToClipboardOnSave ? .on : .off
 
-        let saveToDirectoryCheck = NSButton(
-            checkboxWithTitle: "Save to a folder instead of asking each time",
-            target: self,
-            action: #selector(saveSnipToDirectoryChanged(_:))
+        let saveToDirectoryCheck = makeCheckbox(
+            "Save to a folder instead of asking each time:",
+            action: #selector(saveSnipToDirectoryChanged(_:)),
+            state: settings.saveSnipToDirectory
         )
-        saveToDirectoryCheck.state = settings.saveSnipToDirectory ? .on : .off
 
         let directoryField = NSTextField(labelWithString: snipSaveDirectoryDisplayPath())
         directoryField.translatesAutoresizingMaskIntoConstraints = false
@@ -1121,7 +1134,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         updateSnipSaveDirectoryControlsEnabled()
 
-        return makeColumn([help, snipHotKeyRow, snipOcrHotKeyRow, copyOnSaveCheck, saveToDirectoryCheck, directoryRow])
+        return makeColumn([help, snipHotKeyRow, snipOcrHotKeyRow, makeCheckboxColumn([copyOnSaveCheck, saveToDirectoryCheck]), directoryRow])
     }
 
     private func snipSaveDirectoryDisplayPath() -> String {
@@ -1178,16 +1191,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         recordHotKeyButton.setButtonType(.momentaryPushIn)
         recordHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
         self.recordHotKeyButton = recordHotKeyButton
-        let recordHotKeyRow = makeRow([makeLabel("Record:"), recordHotKeyButton])
+        let recordHotKeyRow = makeRow([makeLabel("Record Toggle:"), recordHotKeyButton])
 
-        let systemAudioCheck = NSButton(checkboxWithTitle: "Capture system audio", target: self, action: #selector(recordSystemAudioChanged(_:)))
-        systemAudioCheck.state = settings.recordSystemAudio ? .on : .off
+        let systemAudioCheck = makeCheckbox("Capture system audio:", action: #selector(recordSystemAudioChanged(_:)), state: settings.recordSystemAudio)
 
-        let micCheck = NSButton(checkboxWithTitle: "Capture microphone", target: self, action: #selector(recordMicrophoneChanged(_:)))
-        micCheck.state = settings.recordMicrophone ? .on : .off
+        let micCheck = makeCheckbox("Capture audio input:", action: #selector(recordMicrophoneChanged(_:)), state: settings.recordMicrophone)
 
-        let windNoiseCheck = NSButton(checkboxWithTitle: "Wind noise removal", target: self, action: #selector(recordNoiseCancellationChanged(_:)))
-        windNoiseCheck.state = settings.recordNoiseCancellation ? .on : .off
+        let windNoiseCheck = makeCheckbox("Noise cancellation:", action: #selector(recordNoiseCancellationChanged(_:)), state: settings.recordNoiseCancellation)
         noiseCancellationCheckbox = windNoiseCheck
 
         let micPopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -1207,7 +1217,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         micPopup.isEnabled = settings.recordMicrophone
         micPopup.widthAnchor.constraint(equalToConstant: 220).isActive = true
         microphonePopup = micPopup
-        let micDeviceRow = makeRow([makeLabel("Device:"), micPopup])
+        let micDeviceRow = makeRow([makeLabel("Microphone:"), micPopup])
         let micOptions = makeIndentedColumn([windNoiseCheck, micDeviceRow])
         updateMicrophoneOptionControls()
 
@@ -1215,7 +1225,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         trimButton.bezelStyle = .rounded
         let trimRow = makeRow([makeLabel("Edit existing video:"), trimButton])
 
-        return makeColumn([help, recordHotKeyRow, systemAudioCheck, micCheck, micOptions, trimRow] + makeWebcamRows(), spacing: 10)
+        return makeColumn([help, recordHotKeyRow, makeCheckboxColumn([systemAudioCheck, micCheck]), micOptions] + makeWebcamRows() + [trimRow], spacing: 10)
     }
 
     // MARK: - Panorama tab
@@ -1237,7 +1247,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         panoramaHotKeyButton.setButtonType(.momentaryPushIn)
         panoramaHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
         self.panoramaHotKeyButton = panoramaHotKeyButton
-        let panoramaHotKeyRow = makeRow([makeLabel("Panorama:"), panoramaHotKeyButton])
+        let panoramaHotKeyRow = makeRow([makeLabel("Panorama Toggle:"), panoramaHotKeyButton])
 
         return makeColumn([help, panoramaHotKeyRow])
     }
@@ -1271,7 +1281,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private func updateMicrophoneOptionControls() {
         microphonePopup?.isEnabled = settings.recordMicrophone
         let supported = settings.recordMicrophone && AudioDevices.supportsWindNoiseRemoval(deviceID: settings.microphoneDeviceID)
-        noiseCancellationCheckbox?.title = supported ? "Wind noise removal" : "Wind noise removal (not supported by selected microphone)"
+        noiseCancellationCheckbox?.title = supported ? "Noise cancellation:" : "Noise cancellation (not supported by selected microphone):"
         noiseCancellationCheckbox?.isEnabled = supported
         noiseCancellationCheckbox?.state = (settings.recordNoiseCancellation && supported) ? .on : .off
         noiseCancellationCheckbox?.toolTip = supported
@@ -1289,8 +1299,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let heading = makeLabel("Webcam overlay:")
         heading.font = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
 
-        let enableCheck = NSButton(checkboxWithTitle: "Show webcam in recordings", target: self, action: #selector(webcamEnabledChanged(_:)))
-        enableCheck.state = settings.webcamEnabled ? .on : .off
+        let enableCheck = makeCheckbox("", action: #selector(webcamEnabledChanged(_:)), state: settings.webcamEnabled)
 
         let devicePopup = NSPopUpButton(frame: .zero, pullsDown: false)
         devicePopup.translatesAutoresizingMaskIntoConstraints = false
@@ -1344,17 +1353,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         shapePopup.widthAnchor.constraint(equalToConstant: 165).isActive = true
 
         let webcamEnableRow = makeRow([heading, enableCheck])
-        let webcamPlacementRow = makeRow([
-            makeLabel("Camera:"), devicePopup,
-            makeLabel("Position:"), positionPopup
-        ])
-        let webcamAppearanceRow = makeRow([
-            makeLabel("Size:"), sizePopup,
-            makeLabel("Shape:"), shapePopup
+        // A grid keeps the two placement/appearance columns aligned so the
+        // Position and Shape labels (and their popups) line up vertically.
+        let webcamGrid = makeFormGrid([
+            [makeLabel("Camera:"), devicePopup, makeLabel("Position:"), positionPopup],
+            [makeLabel("Size:"), sizePopup, makeLabel("Shape:"), shapePopup]
         ])
 
         updateWebcamControlsEnabled()
-        return [webcamEnableRow, webcamPlacementRow, webcamAppearanceRow]
+        return [webcamEnableRow, webcamGrid]
     }
 
     /// Builds a popup whose item indices map directly to a settings integer.
@@ -1486,8 +1493,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         speedSlider.widthAnchor.constraint(equalToConstant: 240).isActive = true
         let speedRow = makeRow([makeLabel("DemoType typing speed:"), makeLabel("Slow"), speedSlider, makeLabel("Fast")])
 
-        let userDrivenCheck = NSButton(checkboxWithTitle: "Drive input with typing", target: self, action: #selector(demoTypeUserDrivenChanged(_:)))
-        userDrivenCheck.state = settings.demoTypeUserDriven ? .on : .off
+        let userDrivenCheck = makeCheckbox("Drive input with typing:", action: #selector(demoTypeUserDrivenChanged(_:)), state: settings.demoTypeUserDriven)
 
         return makeColumn([help, controlsHelp, hotKeyRow, fileRow, speedRow, userDrivenCheck], spacing: 8)
     }
