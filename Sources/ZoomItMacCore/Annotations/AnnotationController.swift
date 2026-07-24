@@ -6,7 +6,7 @@ final class AnnotationController {
     var currentStyle: AnnotationStyle = .default
 
     // Typing mode state, mirroring ZoomIt's font scaling and justification.
-    static let defaultFontSize: CGFloat = 36
+    static let defaultFontSize: CGFloat = 20
     var typingFontSize: CGFloat = AnnotationController.defaultFontSize
     var typingRightAligned: Bool = false
     /// PostScript/font family name used for typing mode. Empty means the
@@ -32,7 +32,7 @@ final class AnnotationController {
         if !name.isEmpty, let font = NSFont(name: name, size: size) {
             return font
         }
-        return NSFont.systemFont(ofSize: size, weight: .semibold)
+        return NSFont.systemFont(ofSize: size, weight: .regular)
     }
 
     func reset() {

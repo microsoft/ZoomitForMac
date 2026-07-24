@@ -94,7 +94,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             let config = NSImage.SymbolConfiguration(paletteColors: [.systemRed])
             let image = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "Recording")?
                 .withSymbolConfiguration(config)
-            image?.size = NSSize(width: 18, height: 18)
+            image?.size = NSSize(width: Self.menuBarIconGlyph, height: Self.menuBarIconGlyph)
             button.image = image
         } else {
             button.image = Self.menuBarIcon()
@@ -116,24 +116,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
-        let staticZoomItem = NSMenuItem(title: "Static Zoom", action: #selector(AppController.activateStaticZoom), keyEquivalent: "")
-        menu.addItem(staticZoomItem)
-        let liveZoomItem = NSMenuItem(title: "Live Zoom", action: #selector(AppController.activateLiveZoom), keyEquivalent: "")
-        menu.addItem(liveZoomItem)
-        let previousRegionItem = NSMenuItem(title: "Capture Previous Region", action: #selector(AppController.capturePreviousRegion), keyEquivalent: "")
-        menu.addItem(previousRegionItem)
-        let recordItem = NSMenuItem(title: "Record Screen", action: #selector(AppController.toggleRecording), keyEquivalent: "")
-        menu.addItem(recordItem)
-        let panoramaItem = NSMenuItem(title: "Panorama Capture", action: #selector(AppController.startPanorama), keyEquivalent: "")
-        menu.addItem(panoramaItem)
-        let breakItem = NSMenuItem(title: "Break Timer", action: #selector(AppController.toggleBreakTimer), keyEquivalent: "")
-        menu.addItem(breakItem)
-        menu.addItem(.separator())
-        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(AppController.showSettings), keyEquivalent: ",")
-        menu.addItem(settingsItem)
-        menu.addItem(NSMenuItem(title: "Check Permissions", action: #selector(AppController.checkPermissions), keyEquivalent: ""))
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(AppController.quit), keyEquivalent: "q"))
+        for entry in Self.statusMenuEntries() {
+            if entry.isSeparator {
+                menu.addItem(.separator())
+            } else {
+                menu.addItem(NSMenuItem(title: entry.title, action: entry.action, keyEquivalent: entry.keyEquivalent))
+            }
+        }
 
         for item in menu.items {
             item.target = controller
@@ -143,12 +132,72 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
+    /// A single status-bar menu entry (or a separator when `action` is nil).
+    struct StatusMenuEntry {
+        let title: String
+        let action: Selector?
+        let keyEquivalent: String
+
+        var isSeparator: Bool { action == nil }
+
+        static let separator = StatusMenuEntry(title: "", action: nil, keyEquivalent: "")
+
+        init(title: String, action: Selector?, keyEquivalent: String) {
+            self.title = title
+            self.action = action
+            self.keyEquivalent = keyEquivalent
+        }
+    }
+
+    /// The status-bar menu. It broadly follows the Windows ZoomIt tray order
+    /// (Options first, then the modes, then Check Permissions and Quit), with
+    /// Panorama Capture as a macOS-only addition after Record and the Break
+    /// Timer placed at the end of the mode group (below Panorama Capture).
+    static func statusMenuEntries() -> [StatusMenuEntry] {
+        [
+            StatusMenuEntry(title: "Settings…", action: #selector(AppController.showSettings), keyEquivalent: ","),
+            .separator,
+            StatusMenuEntry(title: "Draw", action: #selector(AppController.activateDrawWithoutZoom), keyEquivalent: ""),
+            StatusMenuEntry(title: "Static Zoom", action: #selector(AppController.activateStaticZoom), keyEquivalent: ""),
+            StatusMenuEntry(title: "Live Zoom", action: #selector(AppController.activateLiveZoom), keyEquivalent: ""),
+            StatusMenuEntry(title: "Record Screen", action: #selector(AppController.toggleRecording), keyEquivalent: ""),
+            StatusMenuEntry(title: "Panorama Capture", action: #selector(AppController.startPanorama), keyEquivalent: ""),
+            StatusMenuEntry(title: "Break Timer", action: #selector(AppController.toggleBreakTimer), keyEquivalent: ""),
+            .separator,
+            StatusMenuEntry(title: "Check Permissions", action: #selector(AppController.checkPermissions), keyEquivalent: ""),
+            StatusMenuEntry(title: "Quit", action: #selector(AppController.quit), keyEquivalent: "q")
+        ]
+    }
+
     /// Loads the bundled black template version of the Windows ZoomIt icon and
     /// sizes it for the menu bar. As a template image it is tinted by the system
     /// (black on a light menu bar, white on a dark one).
     private static func menuBarIcon() -> NSImage? {
-        guard let image = loadZoomItIcon() else { return nil }
-        image.size = NSSize(width: 18, height: 18)
+        guard let source = loadZoomItIcon() else { return nil }
+        return Self.menuBarImage(from: source)
+    }
+
+    /// The square point size of the menu-bar item's image slot.
+    static let menuBarIconCanvas: CGFloat = 18
+    /// The glyph is drawn smaller than the canvas so ZoomIt's icon carries the
+    /// same interior padding as system menu-bar icons; a full-bleed image made
+    /// it look oversized and misaligned next to them.
+    static let menuBarIconGlyph: CGFloat = 15
+
+    /// Renders `source` centered inside a padded, square template image so it
+    /// matches the size and vertical alignment of other menu-bar icons.
+    static func menuBarImage(from source: NSImage) -> NSImage {
+        let canvas = NSSize(width: menuBarIconCanvas, height: menuBarIconCanvas)
+        let image = NSImage(size: canvas)
+        image.lockFocus()
+        let rect = NSRect(
+            x: (canvas.width - menuBarIconGlyph) / 2,
+            y: (canvas.height - menuBarIconGlyph) / 2,
+            width: menuBarIconGlyph,
+            height: menuBarIconGlyph
+        )
+        source.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+        image.unlockFocus()
         image.isTemplate = true
         return image
     }

@@ -1132,10 +1132,58 @@ final class RecordingController {
         self.clipEditor = editor
         editor.present(tempURL: url, suggestedName: suggestedFilename(), onSave: { [weak self] editedURL in
             self?.clipEditor = nil
-            self?.savePanel(for: editedURL)
+            self?.saveTrimmedClip(editedURL: editedURL, originalURL: url)
         }, onCancel: { [weak self] in
             self?.clipEditor = nil
         })
+    }
+
+    /// Action for saving a clip opened from an existing file (the Trim
+    /// workflow). If the editor exported a new temp file, that temp is moved
+    /// into place; if it returned the user's own original (no edits), the
+    /// original is copied so it is preserved — matching Windows ZoomIt, which
+    /// never deletes the source file.
+    enum TrimSaveAction: Equatable { case move, copy }
+
+    static func trimSaveAction(editedURL: URL, originalURL: URL) -> TrimSaveAction {
+        editedURL == originalURL ? .copy : .move
+    }
+
+    /// Saves a clip that was opened from an existing file, always preserving the
+    /// user's original source file.
+    private func saveTrimmedClip(editedURL: URL, originalURL: URL) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedFilename()
+        panel.allowedContentTypes = [.mpeg4Movie]
+        panel.canCreateDirectories = true
+        NSApp.activate(ignoringOtherApps: true)
+
+        let action = Self.trimSaveAction(editedURL: editedURL, originalURL: originalURL)
+        if panel.runModal() == .OK, let destination = panel.url {
+            if destination != originalURL {
+                try? FileManager.default.removeItem(at: destination)
+            }
+            do {
+                switch action {
+                case .move:
+                    // Move the exported temp file into place; original untouched.
+                    if destination != editedURL {
+                        try FileManager.default.moveItem(at: editedURL, to: destination)
+                    }
+                case .copy:
+                    // No edits: copy the user's original, preserving the source.
+                    if destination != editedURL {
+                        try FileManager.default.copyItem(at: editedURL, to: destination)
+                    }
+                }
+            } catch {
+                let alert = NSAlert(error: error)
+                alert.runModal()
+            }
+        } else if action == .move {
+            // Discard the temp export; never delete the user's original file.
+            try? FileManager.default.removeItem(at: editedURL)
+        }
     }
 
     private func selectRegion(on display: DisplayDescriptor, completion: @escaping (CGRect?) -> Void) {
