@@ -189,21 +189,18 @@ final class SnipController {
         let displaySize: CGSize
         let rect: CGRect
 
-        func rectForCurrentDisplay(_ display: DisplayDescriptor) -> CGRect {
-            guard displaySize.width > 0, displaySize.height > 0 else { return rect }
-            if display.id == displayID {
-                return rect
-            }
+func rectForCurrentDisplay(_ display: DisplayDescriptor) -> CGRect {
+    guard displaySize.width > 0, displaySize.height > 0 else { return rect }
 
-            let widthScale = display.frame.width / displaySize.width
-            let heightScale = display.frame.height / displaySize.height
-            return CGRect(
-                x: rect.minX * widthScale,
-                y: rect.minY * heightScale,
-                width: rect.width * widthScale,
-                height: rect.height * heightScale
-            )
-        }
+    let widthScale = display.frame.width / displaySize.width
+    let heightScale = display.frame.height / displaySize.height
+    return CGRect(
+        x: rect.minX * widthScale,
+        y: rect.minY * heightScale,
+        width: rect.width * widthScale,
+        height: rect.height * heightScale
+    )
+}
     }
 
     private let captureService: ScreenCaptureService
