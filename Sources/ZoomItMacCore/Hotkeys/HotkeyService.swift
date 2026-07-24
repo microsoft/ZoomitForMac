@@ -11,6 +11,8 @@ final class HotkeyService {
     private var snipCopyHotKeyRef: EventHotKeyRef?
     private var snipSaveHotKeyRef: EventHotKeyRef?
     private var snipOcrHotKeyRef: EventHotKeyRef?
+    private var snipPreviousHotKeyRef: EventHotKeyRef?
+    private var snipPreviousSaveHotKeyRef: EventHotKeyRef?
     private var recordHotKeyRef: EventHotKeyRef?
     private var recordRegionHotKeyRef: EventHotKeyRef?
     private var demoTypeHotKeyRef: EventHotKeyRef?
@@ -131,6 +133,8 @@ final class HotkeyService {
                 case 13: command = .snipOcr
                 case 14: command = .startDemoType
                 case 15: command = .resetDemoType
+                case 16: command = .snipPreviousRegion(save: false)
+                case 17: command = .snipPreviousRegion(save: true)
                 default: return noErr
                 }
 
@@ -217,6 +221,30 @@ final class HotkeyService {
                 target,
                 0,
                 &snipOcrHotKeyRef
+            )
+        }
+
+        // Capture Previous Region: reuses the last successful region snip.
+        // The base shortcut copies; the same shortcut with Shift toggled saves.
+        if settings.snipPreviousHotKeyCode != 0 {
+            let snipPreviousModifiers = NSEvent.ModifierFlags(rawValue: settings.snipPreviousHotKeyModifiers)
+            RegisterEventHotKey(
+                UInt32(settings.snipPreviousHotKeyCode),
+                carbonModifiers(from: snipPreviousModifiers),
+                EventHotKeyID(signature: signature, id: 16),
+                target,
+                0,
+                &snipPreviousHotKeyRef
+            )
+
+            let snipPreviousSaveModifiers = NSEvent.ModifierFlags(rawValue: settings.snipPreviousHotKeyModifiers ^ NSEvent.ModifierFlags.shift.rawValue)
+            RegisterEventHotKey(
+                UInt32(settings.snipPreviousHotKeyCode),
+                carbonModifiers(from: snipPreviousSaveModifiers),
+                EventHotKeyID(signature: signature, id: 17),
+                target,
+                0,
+                &snipPreviousSaveHotKeyRef
             )
         }
 
@@ -322,6 +350,14 @@ final class HotkeyService {
             UnregisterEventHotKey(snipOcrHotKeyRef)
         }
         snipOcrHotKeyRef = nil
+        if let snipPreviousHotKeyRef {
+            UnregisterEventHotKey(snipPreviousHotKeyRef)
+        }
+        snipPreviousHotKeyRef = nil
+        if let snipPreviousSaveHotKeyRef {
+            UnregisterEventHotKey(snipPreviousSaveHotKeyRef)
+        }
+        snipPreviousSaveHotKeyRef = nil
         if let recordHotKeyRef {
             UnregisterEventHotKey(recordHotKeyRef)
         }

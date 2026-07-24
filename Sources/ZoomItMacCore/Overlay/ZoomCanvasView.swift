@@ -29,6 +29,7 @@ final class ZoomCanvasView: NSView {
     private var regionRect: CGRect = .zero
     private var regionCursorLease: CrosshairCursorLease?
     private var onRegionSnipFinished: (() -> Void)?
+    private var previousRegionRect: CGRect?
     private var scrollZoomAccumulator: CGFloat = 0
     private let smoothImage: Bool
 
@@ -799,20 +800,17 @@ final class ZoomCanvasView: NSView {
     /// directly to the configured directory instead of showing a dialog.
     private func presentSavePanelOverOverlay(_ image: CGImage) {
         let settings = UserDefaultsSettingsStore().load()
-        if settings.copySnipToClipboardOnSave {
-            ImageExporter.copyToPasteboard(image)
-        }
-        if settings.saveSnipToDirectory {
-            ImageExporter.writeToDirectory(image, directoryPath: settings.snipSaveDirectory)
-            return
-        }
         let savedLevel = window?.level
         let wasCursorHidden = cursorHidden
-        window?.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue - 1)
-        if wasCursorHidden { showSystemCursor() }
-        ImageExporter.presentSavePanel(for: image)
-        if let savedLevel { window?.level = savedLevel }
-        if wasCursorHidden { hideSystemCursor() }
+        ImageExporter.saveImage(image, settings: settings) { [weak self] in
+            guard let self else { return }
+            self.window?.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue - 1)
+            if wasCursorHidden { self.showSystemCursor() }
+        }
+        if !settings.saveSnipToDirectory {
+            if let savedLevel { window?.level = savedLevel }
+            if wasCursorHidden { hideSystemCursor() }
+        }
     }
 
     /// Snapshots exactly what the overlay is displaying (magnified image plus
@@ -858,6 +856,12 @@ final class ZoomCanvasView: NSView {
         needsDisplay = true
     }
 
+    /// Captures with the previously successful region snip, if any.
+    func capturePreviousRegionSnip(action: SnipAction) -> Bool {
+        guard let previousRegionRect else { return false }
+        return performRegionSnip(rect: previousRegionRect, action: action)
+    }
+
     private func updateRegionRect(to point: CGPoint) {
         guard let anchor = regionAnchor else { return }
         regionRect = CGRect(
@@ -876,26 +880,37 @@ final class ZoomCanvasView: NSView {
         regionAnchor = nil
         popRegionCursor()
 
-        if rect.width >= 3, rect.height >= 3, let full = captureViewportImage() {
-            let scale = window?.backingScaleFactor ?? capturedFrame.display.scaleFactor
-            let pixelRect = CGRect(
-                x: rect.minX * scale,
-                y: rect.minY * scale,
-                width: rect.width * scale,
-                height: rect.height * scale
-            ).integral
-            if let cropped = full.cropping(to: pixelRect) {
-                switch action {
-                case .saveImage:
-                    presentSavePanelOverOverlay(cropped)
-                case .copyImage:
-                    ImageExporter.copyToPasteboard(cropped)
-                case .recognizeText:
-                    OcrService.recognizeAndCopy(cropped)
-                }
-            }
-        }
+        _ = performRegionSnip(rect: rect, action: action)
         endRegionSnip()
+    }
+
+    private func performRegionSnip(rect: CGRect, action: SnipAction) -> Bool {
+        guard rect.width >= 3, rect.height >= 3, let full = captureViewportImage() else {
+            return false
+        }
+
+        let scale = window?.backingScaleFactor ?? capturedFrame.display.scaleFactor
+        let pixelRect = CGRect(
+            x: rect.minX * scale,
+            y: rect.minY * scale,
+            width: rect.width * scale,
+            height: rect.height * scale
+        ).integral
+
+        guard let cropped = full.cropping(to: pixelRect) else {
+            return false
+        }
+
+        previousRegionRect = rect
+        switch action {
+        case .saveImage:
+            presentSavePanelOverOverlay(cropped)
+        case .copyImage:
+            ImageExporter.copyToPasteboard(cropped)
+        case .recognizeText:
+            OcrService.recognizeAndCopy(cropped)
+        }
+        return true
     }
 
     private func cancelRegionSnip() {

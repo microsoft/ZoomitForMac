@@ -198,6 +198,25 @@ enum SnipAction {
 /// overlay, and copies or saves the chosen region when the drag is released.
 @MainActor
 final class SnipController {
+    private struct PreviousSelection {
+        let displayID: CGDirectDisplayID
+        let displaySize: CGSize
+        let rect: CGRect
+
+func rectForCurrentDisplay(_ display: DisplayDescriptor) -> CGRect {
+    guard displaySize.width > 0, displaySize.height > 0 else { return rect }
+
+    let widthScale = display.frame.width / displaySize.width
+    let heightScale = display.frame.height / displaySize.height
+    return CGRect(
+        x: rect.minX * widthScale,
+        y: rect.minY * heightScale,
+        width: rect.width * widthScale,
+        height: rect.height * heightScale
+    )
+}
+    }
+
     private let captureService: ScreenCaptureService
     private let displayManager: DisplayManager
     private let permissionService: PermissionService
@@ -208,6 +227,7 @@ final class SnipController {
     private var action: SnipAction = .copyImage
     private var onFinished: (() -> Void)?
     private var cursorLease: CrosshairCursorLease?
+    private var previousSelection: PreviousSelection?
 
     init(
         captureService: ScreenCaptureService,
@@ -257,6 +277,41 @@ final class SnipController {
         }
     }
 
+    /// Repeats the last successful region snip with no selection UI.
+    /// Returns false if there is no previous region to reuse.
+    @discardableResult
+    func capturePrevious(action: SnipAction, onFinished: @escaping () -> Void) -> Bool {
+        guard let previousSelection else {
+            return false
+        }
+
+        self.action = action
+        self.onFinished = onFinished
+
+        guard ScreenRecordingPrompt.ensureGranted(permissionService) else {
+            finish()
+            return true
+        }
+        guard let display = displayManager.activeDisplay() else {
+            NSSound.beep()
+            finish()
+            return true
+        }
+
+        Task { @MainActor in
+            do {
+                let frame = try await captureService.captureDisplay(display)
+                let rect = previousSelection.rectForCurrentDisplay(frame.display)
+                _ = self.handleSelection(rect, in: frame)
+                self.finish()
+            } catch {
+                NSSound.beep()
+                self.finish()
+            }
+        }
+        return true
+    }
+
     private func show(frame: CapturedFrame) {
         capturedFrame = frame
 
@@ -299,18 +354,38 @@ final class SnipController {
             return
         }
 
+        _ = handleSelection(rect, in: frame)
+        finish()
+    }
+
+    @discardableResult
+    private func handleSelection(_ rect: CGRect, in frame: CapturedFrame) -> Bool {
+        guard rect.width >= 3, rect.height >= 3 else {
+            return false
+        }
+
+        let boundedRect = rect.intersection(CGRect(origin: .zero, size: frame.display.frame.size))
+        guard boundedRect.width >= 3, boundedRect.height >= 3 else {
+            return false
+        }
+
         let scale = frame.display.scaleFactor
         let pixelRect = CGRect(
-            x: rect.minX * scale,
-            y: rect.minY * scale,
-            width: rect.width * scale,
-            height: rect.height * scale
+            x: boundedRect.minX * scale,
+            y: boundedRect.minY * scale,
+            width: boundedRect.width * scale,
+            height: boundedRect.height * scale
         ).integral
 
         guard let cropped = frame.image.cropping(to: pixelRect) else {
-            finish()
-            return
+            return false
         }
+
+        previousSelection = PreviousSelection(
+            displayID: frame.display.id,
+            displaySize: frame.display.frame.size,
+            rect: boundedRect
+        )
 
         switch action {
         case .saveImage:
@@ -320,7 +395,7 @@ final class SnipController {
         case .recognizeText:
             OcrService.recognizeAndCopy(cropped)
         }
-        finish()
+        return true
     }
 
     private func closeWindow() {

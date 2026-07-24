@@ -67,19 +67,21 @@ The contributor build is named `ZoomIt (Dev).app` (bundle id `com.sysinternals.z
 
 ## Default Hotkeys
 
-| Action | Shortcut |
-| --- | --- |
-| Static zoom | `Control+1` |
-| Draw without zoom | `Control+2` |
-| Break timer | `Control+3` |
-| Live zoom | `Control+4` |
-| Record screen | `Control+5` |
-| Record region | `Control+Shift+5` |
-| Snip region to clipboard | `Control+6` |
-| Snip region to file | `Control+Shift+6` |
-| OCR region to clipboard | `Control+Option+6` |
-| Panorama to clipboard | `Control+8` |
-| Panorama to file | `Control+Shift+8` |
+| Action                               | Shortcut           |
+| ------------------------------------ | ------------------ |
+| Static zoom                          | `Control+1`        |
+| Draw without zoom                    | `Control+2`        |
+| Break timer                          | `Control+3`        |
+| Live zoom                            | `Control+4`        |
+| Record screen                        | `Control+5`        |
+| Record region                        | `Control+Shift+5`  |
+| Snip region to clipboard             | `Control+6`        |
+| Snip region to file                  | `Control+Shift+6`  |
+| OCR region to clipboard              | `Control+Option+6` |
+| Panorama to clipboard                | `Control+8`        |
+| Panorama to file                     | `Control+Shift+8`  |
+| Capture previous region to clipboard | `Control+9`        |
+| Capture previous region to file      | `Control+Shift+9`  |
 
 All global hotkeys are configurable in Settings. While zoomed, use `Option+Up` and `Option+Down` to change zoom level, mouse wheel to zoom or resize tools depending on mode, `Command+S` / `Command+C` to save or copy the viewport, and `Esc` or right click to exit the active overlay mode.
 
@@ -96,6 +98,8 @@ All global hotkeys are configurable in Settings. While zoomed, use `Option+Up` a
 Press the snip shortcut (`Control+6`) and drag a rectangle to copy that region of the screen to the clipboard; hold `Shift` (`Control+Shift+6`) to save it to a PNG file instead. Snip also works while zoomed, capturing the magnified view.
 
 Press the OCR shortcut (`Control+Option+6`) and drag a rectangle to recognize the text inside it and copy that text to the clipboard. OCR uses Apple's on-device Vision text recognition, runs entirely on-device, and needs no extra permissions. Both shortcuts are configurable on the Snip tab in Settings.
+
+ZoomItMac also remembers the last successful region snip. Use the menu command **Capture Previous Region** or press `Control+9` to repeat that capture without reopening the region selector. Hold `Shift` (`Control+Shift+9`) to save to a file instead of copying.
 
 ## Recording
 

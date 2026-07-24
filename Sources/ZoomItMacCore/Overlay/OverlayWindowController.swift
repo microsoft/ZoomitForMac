@@ -136,6 +136,18 @@ final class OverlayWindowController {
         }
         canvasView.beginRegionSnip(action: action, onFinished: onFinished)
     }
+
+    /// Captures using the last successful viewport-region snip, without showing
+    /// the drag selection UI. Returns false if no previous region exists.
+    func capturePreviousRegionSnip(action: SnipAction, onFinished: @escaping () -> Void) -> Bool {
+        guard let canvasView else {
+            onFinished()
+            return false
+        }
+        let captured = canvasView.capturePreviousRegionSnip(action: action)
+        onFinished()
+        return captured
+    }
     /// The overlay's window number, used to exclude it from live screen capture
     /// so the magnified overlay is never captured back into itself.
     var overlayWindowNumber: Int? { window?.windowNumber }
