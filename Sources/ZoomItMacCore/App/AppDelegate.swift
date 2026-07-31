@@ -178,6 +178,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             StatusMenuEntry(title: "Panorama Capture", action: #selector(AppController.startPanorama), keyEquivalent: ""),
             StatusMenuEntry(title: "Break Timer", action: #selector(AppController.toggleBreakTimer), keyEquivalent: ""),
             .separator,
+            StatusMenuEntry(title: "Keyboard Shortcuts", action: #selector(AppController.showShortcuts), keyEquivalent: "?"),
             StatusMenuEntry(title: "Check Permissions", action: #selector(AppController.checkPermissions), keyEquivalent: ""),
             StatusMenuEntry(title: "Quit", action: #selector(AppController.quit), keyEquivalent: "q")
         ]

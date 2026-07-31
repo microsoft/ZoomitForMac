@@ -64,6 +64,137 @@ final class AppController: NSObject {
         presentPermissionsDialog()
     }
 
+    @objc func showShortcuts() {
+        presentShortcutsDialog()
+    }
+
+    /// Shows a summary of every global keyboard shortcut ZoomIt currently
+    /// responds to. Values are read live from the settings store so any user
+    /// customization is reflected. The list also documents the in-mode keys
+    /// (colors, shapes, undo, etc.) that are handled once an overlay is active.
+    private func presentShortcutsDialog() {
+        let settings = settingsStore.load()
+
+        func describe(code: Int, modifiers: UInt) -> String {
+            guard code != 0 else { return "None" }
+            return SettingsWindowController.describe(
+                keyCode: code,
+                modifiers: NSEvent.ModifierFlags(rawValue: modifiers)
+            )
+        }
+
+        let zoom = describe(code: settings.hotKeyCode, modifiers: settings.hotKeyModifiers)
+        let draw = describe(code: settings.drawHotKeyCode, modifiers: settings.drawHotKeyModifiers)
+        let live = describe(code: settings.liveHotKeyCode, modifiers: settings.liveHotKeyModifiers)
+        let snipCopy = describe(code: settings.snipHotKeyCode, modifiers: settings.snipHotKeyModifiers)
+        let snipSave = describe(
+            code: settings.snipHotKeyCode,
+            modifiers: settings.snipHotKeyModifiers ^ NSEvent.ModifierFlags.shift.rawValue
+        )
+        let snipOcr = describe(code: settings.snipOcrHotKeyCode, modifiers: settings.snipOcrHotKeyModifiers)
+        let record = describe(code: settings.recordHotKeyCode, modifiers: settings.recordHotKeyModifiers)
+        let recordRegion = describe(
+            code: settings.recordHotKeyCode,
+            modifiers: settings.recordHotKeyModifiers ^ NSEvent.ModifierFlags.shift.rawValue
+        )
+        let demo = describe(code: settings.demoTypeHotKeyCode, modifiers: settings.demoTypeHotKeyModifiers)
+        let demoReset: String = {
+            guard settings.demoTypeHotKeyCode != 0 else { return "None" }
+            return describe(
+                code: settings.demoTypeHotKeyCode,
+                modifiers: settings.demoTypeHotKeyModifiers ^ NSEvent.ModifierFlags.shift.rawValue
+            )
+        }()
+        let panoramaCopy = describe(code: settings.panoramaHotKeyCode, modifiers: settings.panoramaHotKeyModifiers)
+        let panoramaSave = describe(
+            code: settings.panoramaHotKeyCode,
+            modifiers: settings.panoramaHotKeyModifiers ^ NSEvent.ModifierFlags.shift.rawValue
+        )
+        let breakTimer = describe(code: settings.breakHotKeyCode, modifiers: settings.breakHotKeyModifiers)
+
+        let global = """
+        Global shortcuts
+          Static Zoom:        \(zoom)
+          Live Zoom:          \(live)
+          Draw w/out Zoom:    \(draw)
+          Snip → Clipboard:   \(snipCopy)
+          Snip → File:        \(snipSave)
+          Snip → OCR:         \(snipOcr)
+          Record Screen:      \(record)
+          Record Region:      \(recordRegion)
+          Panorama → Clipbd:  \(panoramaCopy)
+          Panorama → File:    \(panoramaSave)
+          DemoType Start:     \(demo)
+          DemoType Reset:     \(demoReset)
+          Break Timer:        \(breakTimer)
+        """
+
+        let inMode = """
+        While zoomed / drawing
+          Zoom in / out:      Option+Up / Option+Down (Live Zoom)
+          Draw:               Left mouse button
+          Exit draw:          Right mouse button
+          Undo:               Command+Z or Control+Z
+          Erase all:          E
+          Pen width:          Mouse wheel, [ / ], or Shift+Up/Down
+          Colors:             R G B O Y P W K
+          Highlighter:        Shift + color key
+          Line:               Hold Shift while dragging
+          Rectangle:          Hold Control while dragging
+          Ellipse:            Hold Tab while dragging
+          Arrow:              Hold Shift+Control while dragging
+          Blank screen:       Control+W (white) / Control+K (black)
+          Type text:          T (left) / Shift+T (right)
+          Font size:          + / − while typing
+          Exit:               Esc
+        """
+
+        let alert = NSAlert()
+        alert.messageText = "ZoomIt Keyboard Shortcuts"
+        alert.informativeText = "Customize global shortcuts in Settings…"
+        alert.addButton(withTitle: "Done")
+        alert.addButton(withTitle: "Open Settings…")
+        if let icon = ZoomItAppIcon.standardIcon() {
+            alert.icon = icon
+        }
+
+        // Render the shortcut tables in a monospaced font inside an accessory
+        // view so the two columns line up. NSAlert's informativeText uses the
+        // proportional system font, which makes space-padded columns wobble.
+        let body = global + "\n\n" + inMode
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        let attributed = NSAttributedString(
+            string: body,
+            attributes: [
+                .font: font,
+                .foregroundColor: NSColor.labelColor
+            ]
+        )
+
+        let label = NSTextField(labelWithAttributedString: attributed)
+        label.isSelectable = true
+        label.lineBreakMode = .byClipping
+        label.usesSingleLineMode = false
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        // Size the accessory view to fit the intrinsic text size so NSAlert
+        // grows the whole dialog around it instead of clipping it.
+        let fitting = label.sizeThatFits(NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
+        let container = NSView(frame: NSRect(origin: .zero, size: fitting))
+        container.translatesAutoresizingMaskIntoConstraints = true
+        container.addSubview(label)
+        label.frame = container.bounds
+        label.autoresizingMask = [.width, .height]
+        alert.accessoryView = container
+
+        alert.window.animationBehavior = .none
+        NSApp.activate(ignoringOtherApps: true)
+
+        if alert.runModal() == .alertSecondButtonReturn {
+            settingsWindowController.show()
+        }
+    }
+
     /// Shows the permission status dialog and acts on the chosen button, then
     /// re-presents itself so the user can grant or open settings for several
     /// permissions in one sitting and watch the status refresh. For the
