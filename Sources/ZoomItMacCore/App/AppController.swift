@@ -98,13 +98,10 @@ final class AppController: NSObject {
             modifiers: settings.recordHotKeyModifiers ^ NSEvent.ModifierFlags.shift.rawValue
         )
         let demo = describe(code: settings.demoTypeHotKeyCode, modifiers: settings.demoTypeHotKeyModifiers)
-        let demoReset: String = {
-            guard settings.demoTypeHotKeyCode != 0 else { return "None" }
-            return describe(
-                code: settings.demoTypeHotKeyCode,
-                modifiers: settings.demoTypeHotKeyModifiers ^ NSEvent.ModifierFlags.shift.rawValue
-            )
-        }()
+        let demoReset = describe(
+            code: settings.demoTypeHotKeyCode,
+            modifiers: settings.demoTypeHotKeyModifiers ^ NSEvent.ModifierFlags.shift.rawValue
+        )
         let panoramaCopy = describe(code: settings.panoramaHotKeyCode, modifiers: settings.panoramaHotKeyModifiers)
         let panoramaSave = describe(
             code: settings.panoramaHotKeyCode,
@@ -179,7 +176,9 @@ final class AppController: NSObject {
 
         // Size the accessory view to fit the intrinsic text size so NSAlert
         // grows the whole dialog around it instead of clipping it.
-        let fitting = label.sizeThatFits(NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
+        let fitting = label.sizeThatFits(
+            NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        )
         let container = NSView(frame: NSRect(origin: .zero, size: fitting))
         container.translatesAutoresizingMaskIntoConstraints = true
         container.addSubview(label)

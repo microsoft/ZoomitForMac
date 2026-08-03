@@ -601,10 +601,8 @@ public enum SelfTestRunner {
     /// Every non-separator status-menu entry must have a non-nil action that
     /// AppController actually responds to; otherwise the menu item would be
     /// permanently disabled at runtime. Regression guard for wiring up new
-    /// entries such as "Keyboard Shortcuts…".
+    /// entries such as "Keyboard Shortcuts".
     private static func testStatusMenuActionsAreWired() throws {
-        let controller = NSObject.self // placeholder; we only need selector resolution below.
-        _ = controller
         for entry in AppDelegate.statusMenuEntries() where !entry.isSeparator {
             guard let action = entry.action else {
                 throw SelfTestError.failure("Expected menu entry '\(entry.title)' to have an action")
