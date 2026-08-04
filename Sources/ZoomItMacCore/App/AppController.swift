@@ -172,7 +172,7 @@ final class AppController: NSObject {
         label.isSelectable = true
         label.lineBreakMode = .byClipping
         label.usesSingleLineMode = false
-        label.translatesAutoresizingMaskIntoConstraints = false
+        label.translatesAutoresizingMaskIntoConstraints = true
 
         // Size the accessory view to fit the intrinsic text size so NSAlert
         // grows the whole dialog around it instead of clipping it.
