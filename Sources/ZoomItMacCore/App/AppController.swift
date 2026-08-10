@@ -82,29 +82,19 @@ final class AppController: NSObject {
         let screenGranted = state.screenCapture.isGranted
         let micStatus = permissionService.microphoneStatus()
         let camStatus = permissionService.cameraStatus()
-        func describe(_ status: MicrophonePermission) -> String {
-            switch status {
-            case .granted: return "Granted"
-            case .denied: return "Denied"
-            case .notDetermined: return "Not requested"
-            }
-        }
 
         let alert = NSAlert()
         alert.messageText = "ZoomIt Permissions"
-        alert.informativeText = """
-        Screen Recording: \(screenGranted ? "Granted" : "Missing")
-        Microphone: \(describe(micStatus))
-        Camera: \(describe(camStatus))
-
-        Screen Recording is required for zoom, snip, and recording. Microphone and Camera are optional — used for recording your voice and webcam.
-
-        Newly granted Screen Recording takes effect after you relaunch ZoomIt.
-        """
+        alert.accessoryView = Self.makePermissionsAccessoryView(
+            screenGranted: screenGranted,
+            micStatus: micStatus,
+            camStatus: camStatus
+        )
         alert.addButton(withTitle: "Done")
         alert.addButton(withTitle: screenGranted ? "Screen Recording Settings…" : "Grant Screen Recording…")
         alert.addButton(withTitle: micStatus == .notDetermined ? "Grant Microphone…" : "Microphone Settings…")
         alert.addButton(withTitle: camStatus == .notDetermined ? "Grant Camera…" : "Camera Settings…")
+        alert.addButton(withTitle: "Run Welcome…")
         // Use a standard macOS-style rounded-square icon so the dialog matches
         // the look of system permission prompts and the icon top lines up with
         // the message text.
@@ -145,6 +135,8 @@ final class AppController: NSObject {
                 permissionService.openCameraSettings()
                 representWhenActive()
             }
+        case NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 2):
+            showPermissionsWizard()
         default:
             break
         }
@@ -172,6 +164,68 @@ final class AppController: NSObject {
                 self.presentPermissionsDialog()
             }
         }
+    }
+
+    /// Builds the Check Permissions dialog's accessory view: the three status
+    /// lines (with "Granted" shown in green, since NSAlert's plain
+    /// `informativeText` can't color individual words) followed by the
+    /// explanatory paragraph.
+    private static func makePermissionsAccessoryView(
+        screenGranted: Bool,
+        micStatus: MicrophonePermission,
+        camStatus: MicrophonePermission
+    ) -> NSView {
+        func describe(_ status: MicrophonePermission) -> String {
+            switch status {
+            case .granted: return "Granted"
+            case .denied: return "Denied"
+            case .notDetermined: return "Not requested"
+            }
+        }
+
+        let width: CGFloat = 300
+        let labelFont = NSFont.systemFont(ofSize: 13)
+
+        let statusText = NSMutableAttributedString()
+        func appendStatusLine(_ label: String, _ value: String, granted: Bool) {
+            if statusText.length > 0 {
+                statusText.append(NSAttributedString(string: "\n"))
+            }
+            statusText.append(NSAttributedString(
+                string: "\(label): ",
+                attributes: [.font: labelFont, .foregroundColor: NSColor.labelColor]
+            ))
+            statusText.append(NSAttributedString(
+                string: value,
+                attributes: [.font: labelFont, .foregroundColor: granted ? NSColor.systemGreen : NSColor.labelColor]
+            ))
+        }
+        appendStatusLine("Screen Recording", screenGranted ? "Granted" : "Missing", granted: screenGranted)
+        appendStatusLine("Microphone", describe(micStatus), granted: micStatus == .granted)
+        appendStatusLine("Camera", describe(camStatus), granted: camStatus == .granted)
+
+        let statusField = NSTextField(labelWithAttributedString: statusText)
+        let statusHeight = statusField.sizeThatFits(NSSize(width: width, height: .greatestFiniteMagnitude)).height
+
+        let explanation = NSTextField(wrappingLabelWithString: """
+        Screen Recording is required for zoom, snip, and recording. Microphone and Camera are optional — used for recording your voice and webcam.
+
+        Newly granted Screen Recording takes effect after you relaunch ZoomIt.
+        """)
+        explanation.font = labelFont
+        explanation.textColor = .labelColor
+        explanation.preferredMaxLayoutWidth = width
+        let explanationHeight = explanation.sizeThatFits(NSSize(width: width, height: .greatestFiniteMagnitude)).height
+
+        let spacing: CGFloat = 12
+        let totalHeight = statusHeight + spacing + explanationHeight
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: totalHeight))
+        explanation.frame = NSRect(x: 0, y: 0, width: width, height: explanationHeight)
+        statusField.frame = NSRect(x: 0, y: explanationHeight + spacing, width: width, height: statusHeight)
+        container.addSubview(explanation)
+        container.addSubview(statusField)
+        return container
     }
 
     @objc func quit() {
