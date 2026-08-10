@@ -705,9 +705,14 @@ public enum SelfTestRunner {
 
     private static func testTypingPreservesBlankScreen() throws {
         try expect(!ZoomCanvasView.clearsBlankScreenWhenLeavingDrawing(for: .typing),
-                   "Expected entering typing mode to preserve the sketch-pad background")
-        try expect(ZoomCanvasView.clearsBlankScreenWhenLeavingDrawing(for: .staticZoom),
-                   "Expected a normal drawing-mode exit to clear the sketch-pad background")
+                   "Expected leaving drawing for typing mode to preserve the sketch-pad background")
+
+        let modesThatShouldClear: [AppMode] = [.idle, .staticZoom, .drawOnly, .liveZoom, .captureSelection,
+                                              .panoramaCapture, .recording, .breakTimer]
+        for mode in modesThatShouldClear {
+            try expect(ZoomCanvasView.clearsBlankScreenWhenLeavingDrawing(for: mode),
+                       "Expected leaving drawing for \(mode) to clear the sketch-pad background")
+        }
     }
 
     /// The Type tab's "Sample" preview must render in the selected typing font
