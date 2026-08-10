@@ -77,13 +77,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeyService.start()
 
-        // On a fresh install, open Settings so the user has a clear entry point
-        // instead of a silent menu-bar-only launch (issue #21). Upgrading users
-        // are detected as returning by hasCompletedFirstLaunch, so they don't get
-        // an unexpected pop-up. Persist the flag either way so later launches no
+        // On a fresh install, show the welcome/permissions wizard so the user has
+        // a clear entry point instead of a silent menu-bar-only launch (issue
+        // #21), and understands the one permission ZoomIt asks for before being
+        // dropped into the denser Settings window. Upgrading users are detected
+        // as returning by hasCompletedFirstLaunch, so they don't get an
+        // unexpected pop-up. Persist the flag either way so later launches no
         // longer depend on the legacy migration sentinel.
         if !settingsStore.hasCompletedFirstLaunch {
-            appController?.showSettings()
+            appController?.showPermissionsWizard()
         }
         settingsStore.markFirstLaunchCompleted()
     }
@@ -178,6 +180,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             StatusMenuEntry(title: "Panorama Capture", action: #selector(AppController.startPanorama), keyEquivalent: ""),
             StatusMenuEntry(title: "Break Timer", action: #selector(AppController.toggleBreakTimer), keyEquivalent: ""),
             .separator,
+            StatusMenuEntry(title: "Welcome & Permissions…", action: #selector(AppController.showPermissionsWizard), keyEquivalent: ""),
             StatusMenuEntry(title: "Check Permissions", action: #selector(AppController.checkPermissions), keyEquivalent: ""),
             StatusMenuEntry(title: "Quit", action: #selector(AppController.quit), keyEquivalent: "q")
         ]

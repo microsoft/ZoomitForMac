@@ -18,6 +18,9 @@ final class AppController: NSObject {
         onRequestCamera: { [weak self] in self?.permissionService.requestCameraAccess(completion: nil) },
         onOpenTrimEditor: { [weak self] in self?.modeCoordinator.openTrimEditor() }
     )
+    private lazy var permissionsWizardWindowController = PermissionsWizardWindowController(
+        permissionService: permissionService
+    )
 
     init(
         settingsStore: SettingsStore,
@@ -62,6 +65,10 @@ final class AppController: NSObject {
 
     @objc func checkPermissions() {
         presentPermissionsDialog()
+    }
+
+    @objc func showPermissionsWizard() {
+        permissionsWizardWindowController.show()
     }
 
     /// Shows the permission status dialog and acts on the chosen button, then
