@@ -58,6 +58,7 @@ public enum SelfTestRunner {
         try testSettingsWindowStaysOnTop()
         try testZoomAndLiveZoomAreSeparateTabs()
         try testBlankScreenUsesControlKeys()
+        try testTypingPreservesBlankScreen()
         try testTypeTabFontSampleUsesSelectedFont()
         try testMenuBarIconIsPaddedTemplate()
         try testStandardIconIsRoundedSquareWithMargin()
@@ -700,6 +701,13 @@ public enum SelfTestRunner {
                    "Expected Shift+W/K to select the highlighter")
         try expect(ZoomCanvasView.whiteBlackKeyAction(control: true, shift: false, isDrawingMode: false) == .penColor,
                    "Expected Ctrl+W/K outside drawing mode to fall back to the pen colour")
+    }
+
+    private static func testTypingPreservesBlankScreen() throws {
+        try expect(!ZoomCanvasView.clearsBlankScreenWhenLeavingDrawing(for: .typing),
+                   "Expected entering typing mode to preserve the sketch-pad background")
+        try expect(ZoomCanvasView.clearsBlankScreenWhenLeavingDrawing(for: .staticZoom),
+                   "Expected a normal drawing-mode exit to clear the sketch-pad background")
     }
 
     /// The Type tab's "Sample" preview must render in the selected typing font

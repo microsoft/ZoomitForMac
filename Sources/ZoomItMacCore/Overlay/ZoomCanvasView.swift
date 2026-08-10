@@ -54,7 +54,10 @@ final class ZoomCanvasView: NSView {
             switch interactionMode {
             case .typing:
                 let wasDrawing = isDrawingMode
-                exitDrawingMode(restoreCursor: false)
+                exitDrawingMode(
+                    restoreCursor: false,
+                    clearBlankScreen: Self.clearsBlankScreenWhenLeavingDrawing(for: interactionMode)
+                )
                 // When coming from drawing, the pen dot is already tracked in
                 // pointerViewPoint; exitDrawingMode warps the system cursor, so
                 // don't re-read the mouse. Otherwise sync to the real cursor so
@@ -502,6 +505,10 @@ final class ZoomCanvasView: NSView {
         return .penColor
     }
 
+    static func clearsBlankScreenWhenLeavingDrawing(for mode: AppMode) -> Bool {
+        mode != .typing
+    }
+
     private func drawTypingCaret(in context: CGContext, source: CGRect) {
         guard let caret = annotationController.typingCaret() else { return }
         let color = annotationController.currentStyle.color.nsColor
@@ -559,12 +566,14 @@ final class ZoomCanvasView: NSView {
         updateLiveZoomInteractivity()
     }
 
-    private func exitDrawingMode(restoreCursor: Bool = true) {
+    private func exitDrawingMode(restoreCursor: Bool = true, clearBlankScreen: Bool = true) {
         guard isDrawingMode else { return }
         isDrawingMode = false
         isStroking = false
         activeStrokeTool = nil
-        blankScreen = nil
+        if clearBlankScreen {
+            blankScreen = nil
+        }
         stopDrawingRightClickMonitor()
         // Keep the zoom anchored where it was while drawing. The physical mouse
         // moved around the screen while drawing, so warp the (hidden) system
