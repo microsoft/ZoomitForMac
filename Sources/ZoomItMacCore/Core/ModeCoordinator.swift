@@ -155,7 +155,6 @@ final class ModeCoordinator {
             // Shift+color: translucent highlighter of that color.
             annotationController.currentStyle.color = color
             annotationController.currentStyle.alpha = AnnotationStyle.highlightAlpha
-            persistLastPenColor(color)
         case .increasePenWidth:
             annotationController.currentStyle.rootWidth += 1
         case .decreasePenWidth:
