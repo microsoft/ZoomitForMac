@@ -19,7 +19,8 @@ final class AppController: NSObject {
         onOpenTrimEditor: { [weak self] in self?.modeCoordinator.openTrimEditor() }
     )
     private lazy var permissionsWizardWindowController = PermissionsWizardWindowController(
-        permissionService: permissionService
+        permissionService: permissionService,
+        settingsStore: settingsStore
     )
 
     init(
@@ -71,6 +72,14 @@ final class AppController: NSObject {
         permissionsWizardWindowController.show()
     }
 
+    /// The button reads "Grant…" only the very first time — once macOS has
+    /// shown the one-time system prompt (whether granted, denied, or
+    /// dismissed), it always reads "Settings…" since re-requesting can no
+    /// longer show anything.
+    private func screenButtonTitle(granted: Bool) -> String {
+        (granted || settingsStore.hasRequestedScreenCaptureAccess) ? "Screen Recording Settings…" : "Grant Screen Recording…"
+    }
+
     /// Shows the permission status dialog and acts on the chosen button, then
     /// re-presents itself so the user can grant or open settings for several
     /// permissions in one sitting and watch the status refresh. For the
@@ -91,7 +100,7 @@ final class AppController: NSObject {
             camStatus: camStatus
         )
         alert.addButton(withTitle: "Done")
-        alert.addButton(withTitle: screenGranted ? "Screen Recording Settings…" : "Grant Screen Recording…")
+        alert.addButton(withTitle: screenButtonTitle(granted: screenGranted))
         alert.addButton(withTitle: micStatus == .notDetermined ? "Grant Microphone…" : "Microphone Settings…")
         alert.addButton(withTitle: camStatus == .notDetermined ? "Grant Camera…" : "Camera Settings…")
         alert.addButton(withTitle: "Run Welcome…")
@@ -106,10 +115,14 @@ final class AppController: NSObject {
 
         switch alert.runModal() {
         case .alertSecondButtonReturn:
-            if screenGranted {
+            if screenGranted || settingsStore.hasRequestedScreenCaptureAccess {
+                // Either already granted, or macOS already showed the
+                // one-time prompt before — requesting again would silently
+                // do nothing, so send the user to Settings instead.
                 permissionService.openSystemSettings()
                 representWhenActive()
             } else {
+                settingsStore.markScreenCaptureAccessRequested()
                 let granted = permissionService.requestScreenCaptureAccess()
                 if granted {
                     presentPermissionsDialog()

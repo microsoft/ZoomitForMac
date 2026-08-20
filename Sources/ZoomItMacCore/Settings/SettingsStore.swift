@@ -181,6 +181,11 @@ struct AppSettings: Equatable {
 protocol SettingsStore {
     func load() -> AppSettings
     func save(_ settings: AppSettings)
+    /// True once ZoomIt has ever called `CGRequestScreenCaptureAccess()` — see
+    /// `UserDefaultsSettingsStore.hasRequestedScreenCaptureAccess` for why the
+    /// permissions wizard needs to know this.
+    var hasRequestedScreenCaptureAccess: Bool { get }
+    func markScreenCaptureAccessRequested()
 }
 
 final class UserDefaultsSettingsStore: SettingsStore {
@@ -239,6 +244,7 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let saveSnipToDirectory = "saveSnipToDirectory"
         static let snipSaveDirectory = "snipSaveDirectory"
         static let hasCompletedFirstLaunch = "hasCompletedFirstLaunch"
+        static let hasRequestedScreenCaptureAccess = "hasRequestedScreenCaptureAccess"
     }
 
     private let defaults: UserDefaults
@@ -275,6 +281,20 @@ final class UserDefaultsSettingsStore: SettingsStore {
 
     func markFirstLaunchCompleted() {
         defaults.set(true, forKey: Key.hasCompletedFirstLaunch)
+    }
+
+    /// True once ZoomIt has called `CGRequestScreenCaptureAccess()` at least
+    /// once. macOS only shows the system permission prompt the *first* time
+    /// that's called — later calls silently return without prompting if the
+    /// user dismissed or denied it before. The onboarding wizard uses this to
+    /// know when it must send the user to System Settings directly instead of
+    /// requesting again and having nothing visibly happen.
+    var hasRequestedScreenCaptureAccess: Bool {
+        defaults.bool(forKey: Key.hasRequestedScreenCaptureAccess)
+    }
+
+    func markScreenCaptureAccessRequested() {
+        defaults.set(true, forKey: Key.hasRequestedScreenCaptureAccess)
     }
 
     func load() -> AppSettings {

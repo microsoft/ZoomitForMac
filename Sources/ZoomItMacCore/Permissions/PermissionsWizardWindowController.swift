@@ -9,6 +9,7 @@ import AppKit
 @MainActor
 final class PermissionsWizardWindowController: NSObject, NSWindowDelegate {
     private let permissionService: PermissionService
+    private let settingsStore: SettingsStore
     private let onFinished: () -> Void
 
     private var window: NSWindow?
@@ -32,8 +33,9 @@ final class PermissionsWizardWindowController: NSObject, NSWindowDelegate {
     private static let footerHeight: CGFloat = 56
     private static let pageAreaHeight = windowSize.height - footerHeight
 
-    init(permissionService: PermissionService, onFinished: @escaping () -> Void = {}) {
+    init(permissionService: PermissionService, settingsStore: SettingsStore, onFinished: @escaping () -> Void = {}) {
         self.permissionService = permissionService
+        self.settingsStore = settingsStore
         self.onFinished = onFinished
         super.init()
     }
@@ -161,8 +163,13 @@ final class PermissionsWizardWindowController: NSObject, NSWindowDelegate {
         statusLabel = status
 
         let granted = permissionService.currentState().screenCapture.isGranted
+        // Once macOS has shown the system prompt once, calling
+        // requestScreenCaptureAccess() again is a silent no-op if the user
+        // dismissed or denied it — so from that point on, the button must
+        // send the user to System Settings instead of "re-requesting".
+        let alreadyPrompted = settingsStore.hasRequestedScreenCaptureAccess
 
-        let grant = NSButton(title: grantButtonTitle(granted: granted), target: self, action: #selector(grantTapped))
+        let grant = NSButton(title: grantButtonTitle(granted: granted, alreadyPrompted: alreadyPrompted), target: self, action: #selector(grantTapped))
         grant.bezelStyle = .rounded
         grant.frame = NSRect(x: (Self.windowSize.width - 220) / 2, y: 64, width: 220, height: 32)
         grantButton = grant
@@ -184,8 +191,11 @@ final class PermissionsWizardWindowController: NSObject, NSWindowDelegate {
         return view
     }
 
-    private func grantButtonTitle(granted: Bool) -> String {
-        granted ? "Open Screen Recording Settings…" : "Grant Screen Recording…"
+    /// The button reads "Grant…" only the very first time — once macOS has
+    /// shown the prompt (whether granted, denied, or dismissed), it always
+    /// reads "Open Settings…" since re-requesting can no longer show anything.
+    private func grantButtonTitle(granted: Bool, alreadyPrompted: Bool) -> String {
+        (granted || alreadyPrompted) ? "Open Screen Recording Settings…" : "Grant Screen Recording…"
     }
 
     private func updateStatusLabel(granted: Bool) {
@@ -195,9 +205,13 @@ final class PermissionsWizardWindowController: NSObject, NSWindowDelegate {
 
     @objc private func grantTapped() {
         let state = permissionService.currentState()
-        if state.screenCapture.isGranted {
+        if state.screenCapture.isGranted || settingsStore.hasRequestedScreenCaptureAccess {
+            // Either already granted, or macOS already showed the one-time
+            // prompt before (denied/dismissed) — requesting again would
+            // silently do nothing, so send the user to Settings instead.
             permissionService.openSystemSettings()
         } else {
+            settingsStore.markScreenCaptureAccessRequested()
             _ = permissionService.requestScreenCaptureAccess()
         }
         // Screen Recording's grant is cached per-process by macOS, so this
