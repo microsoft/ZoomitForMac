@@ -27,17 +27,23 @@ enum ImageExporter {
     static func saveImage(
         _ image: CGImage,
         settings: AppSettings,
+        userSelectedResourceAccess: UserSelectedResourceAccess,
         onWillShowSaveDialog: (() -> Void)? = nil
     ) {
         if settings.copySnipToClipboardOnSave {
             copyToPasteboard(image)
         }
         if settings.saveSnipToDirectory {
-            writeToDirectory(image, directoryPath: settings.snipSaveDirectory)
-        } else {
-            onWillShowSaveDialog?()
-            presentSavePanel(for: image)
+            if writeToDirectory(
+                image,
+                directoryPath: settings.snipSaveDirectory,
+                userSelectedResourceAccess: userSelectedResourceAccess
+            ) {
+                return
+            }
         }
+        onWillShowSaveDialog?()
+        presentSavePanel(for: image)
     }
 
     /// Presents a Save dialog defaulting to a timestamped PNG name and writes
@@ -62,25 +68,30 @@ enum ImageExporter {
 
     /// Writes the image as a timestamped PNG into `directoryPath` (or the user's
     /// Documents folder when it is empty), creating the directory if needed.
-    static func writeToDirectory(_ image: CGImage, directoryPath: String) {
-        let directoryURL = resolvedSaveDirectory(directoryPath)
-        let fileManager = FileManager.default
+    @discardableResult
+    static func writeToDirectory(
+        _ image: CGImage,
+        directoryPath: String,
+        userSelectedResourceAccess: UserSelectedResourceAccess
+    ) -> Bool {
         do {
-            try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        } catch {
-            NSApp.activate(ignoringOtherApps: true)
-            NSAlert(error: error).runModal()
-            return
-        }
+            try userSelectedResourceAccess.withAccess(
+                to: .snipDirectory,
+                legacyPath: resolvedSaveDirectory(directoryPath).path
+            ) { directoryURL in
+                let fileManager = FileManager.default
+                try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
 
-        let url = directoryURL.appendingPathComponent(suggestedFilename())
-        let rep = NSBitmapImageRep(cgImage: image)
-        guard let png = rep.representation(using: .png, properties: [:]) else { return }
-        do {
-            try png.write(to: url)
+                let url = directoryURL.appendingPathComponent(suggestedFilename())
+                let rep = NSBitmapImageRep(cgImage: image)
+                guard let png = rep.representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
+                try png.write(to: url)
+            }
+            return true
         } catch {
             NSApp.activate(ignoringOtherApps: true)
             NSAlert(error: error).runModal()
+            return false
         }
     }
 

@@ -6,6 +6,7 @@ final class AppController: NSObject {
     private let permissionService: PermissionService
     private let hotkeyService: HotkeyService
     private let modeCoordinator: ModeCoordinator
+    private let userSelectedResourceAccess: UserSelectedResourceAccess
     /// One-shot observer used to re-present the permissions dialog when the user
     /// returns to ZoomIt after being sent to System Settings.
     private var permissionReactivationObserver: NSObjectProtocol?
@@ -16,7 +17,8 @@ final class AppController: NSObject {
         onResumeHotkeys: { [weak self] in self?.hotkeyService.start() },
         onRequestMicrophone: { [weak self] in self?.permissionService.requestMicrophoneAccess(completion: nil) },
         onRequestCamera: { [weak self] in self?.permissionService.requestCameraAccess(completion: nil) },
-        onOpenTrimEditor: { [weak self] in self?.modeCoordinator.openTrimEditor() }
+        onOpenTrimEditor: { [weak self] in self?.modeCoordinator.openTrimEditor() },
+        userSelectedResourceAccess: userSelectedResourceAccess
     )
     private lazy var permissionsWizardWindowController = PermissionsWizardWindowController(
         permissionService: permissionService,
@@ -27,12 +29,14 @@ final class AppController: NSObject {
         settingsStore: SettingsStore,
         permissionService: PermissionService,
         hotkeyService: HotkeyService,
-        modeCoordinator: ModeCoordinator
+        modeCoordinator: ModeCoordinator,
+        userSelectedResourceAccess: UserSelectedResourceAccess
     ) {
         self.settingsStore = settingsStore
         self.permissionService = permissionService
         self.hotkeyService = hotkeyService
         self.modeCoordinator = modeCoordinator
+        self.userSelectedResourceAccess = userSelectedResourceAccess
         super.init()
     }
 
@@ -54,6 +58,10 @@ final class AppController: NSObject {
 
     @objc func startPanorama() {
         modeCoordinator.handle(.startPanorama(save: false))
+    }
+
+    @objc func toggleDemoMirror() {
+        modeCoordinator.handle(.toggleDemoMirror(scope: .screen))
     }
 
     @objc func toggleBreakTimer() {

@@ -41,11 +41,13 @@ public enum SelfTestRunner {
         try testAnnotationRenderingTouchesPixels()
         try testSettingsRoundTrip()
         try testFirstLaunchFlag()
+        #if !ZOOMIT_APP_STORE
         try testDemoTypeSettingsRoundTrip()
         try testDemoTypeScriptCleaningAndTokens()
         try testDemoTypeScriptDecoding()
         try testDemoTypeTypingDelayRange()
         try testDemoTypeUserDrivenStepStopsAtEnd()
+        #endif
         try testBreakTimerLayout()
         try testBreakTimerBackgroundNotFlipped()
         try testPanoramaSelectionBorderColor()
@@ -57,6 +59,8 @@ public enum SelfTestRunner {
         try testTrimSavePreservesOriginal()
         try testSettingsWindowStaysOnTop()
         try testZoomAndLiveZoomAreSeparateTabs()
+        try testDistributionSpecificSettingsTabs()
+        try testSettingsPaneSymbolsResolve()
         try testBlankScreenUsesControlKeys()
         try testTypeTabFontSampleUsesSelectedFont()
         try testMenuBarIconIsPaddedTemplate()
@@ -349,6 +353,7 @@ public enum SelfTestRunner {
         legacyDefaults.removePersistentDomain(forName: legacySuite)
     }
 
+    #if !ZOOMIT_APP_STORE
     private static func testDemoTypeSettingsRoundTrip() throws {
         let suiteName = "ZoomItMacSelfTest.DemoType.\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -417,6 +422,7 @@ public enum SelfTestRunner {
         try expect(DemoTypeController.completedUserDrivenEntryOffsetForTesting(script, startOffset: 7) == script.count, "Expected final [end] to leave DemoType at EOF instead of wrapping in the active entry")
         try expect(DemoTypeController.completedUserDrivenEntryOffsetForTesting("abc", startOffset: 0) == 0, "Expected scripts without [end] to wrap after EOF")
     }
+    #endif
 
     private static func testStaticZoomStaysAtOneX() throws {
         // Windows ZoomIt keeps static zoom active when the user zooms all the
@@ -674,6 +680,19 @@ public enum SelfTestRunner {
         try expect(window.hidesOnDeactivate == false, "Expected settings window not to hide when the app deactivates")
     }
 
+    /// The Options dialog lists its panes in a sidebar, which needs a
+    /// resolvable SF Symbol per pane. A typo'd symbol name yields a nil image
+    /// and a silently blank icon, so check every pane.
+    private static func testSettingsPaneSymbolsResolve() throws {
+        for title in SettingsWindowController.settingsTabTitles {
+            let symbol = SettingsWindowController.paneSymbolName(for: title)
+            try expect(
+                NSImage(systemSymbolName: symbol, accessibilityDescription: nil) != nil,
+                "Expected settings pane \"\(title)\" to have a resolvable SF Symbol, got \"\(symbol)\""
+            )
+        }
+    }
+
     /// Windows keeps static-zoom and live-zoom settings on separate tabs (the
     /// Zoom tab is static-only). Verify the Mac Options dialog exposes a
     /// distinct "Live Zoom" tab immediately after "Zoom".
@@ -685,6 +704,14 @@ public enum SelfTestRunner {
         try expect(titles.contains("Live Zoom"), "Expected a separate Live Zoom tab")
         try expect(titles.firstIndex(of: "Live Zoom") == zoomIndex + 1,
                    "Expected Live Zoom to be its own tab right after Zoom, got \(titles)")
+    }
+
+    private static func testDistributionSpecificSettingsTabs() throws {
+        let hasDemoType = SettingsWindowController.settingsTabTitles.contains("DemoType")
+        try expect(
+            hasDemoType != DistributionChannel.isAppStore,
+            "Expected DemoType to be present only in the Homebrew settings surface"
+        )
     }
 
     /// The blank-screen sketch pad is triggered with Ctrl+W / Ctrl+K while

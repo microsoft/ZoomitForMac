@@ -4,7 +4,22 @@ set -euo pipefail
 ROOT_DIR="${0:A:h:h}"
 CONFIGURATION="${1:-debug}"
 ICON_SOURCE="$ROOT_DIR/Sources/ZoomItMacCore/Resources/ZoomItColorIcon.png"
-ENTITLEMENTS="$ROOT_DIR/Scripts/ZoomIt.entitlements"
+
+DIST_DISTRIBUTION="${ZOOMIT_DISTRIBUTION:-homebrew}"
+case "$DIST_DISTRIBUTION" in
+    homebrew)
+        ENTITLEMENTS="$ROOT_DIR/Scripts/ZoomIt.entitlements"
+        distribution_swift_flags=()
+        ;;
+    appstore)
+        ENTITLEMENTS="$ROOT_DIR/Scripts/ZoomIt-AppStore.entitlements"
+        distribution_swift_flags=(-Xswiftc -DZOOMIT_APP_STORE)
+        ;;
+    *)
+        echo "error: ZOOMIT_DISTRIBUTION must be 'homebrew' or 'appstore' (got '$DIST_DISTRIBUTION')." >&2
+        exit 2
+        ;;
+esac
 
 # Local builds default to 1.0 when ZOOMIT_VERSION is absent. An explicitly
 # empty value still fails, which prevents a queued official build from silently
@@ -15,6 +30,12 @@ VERSION="${ZOOMIT_VERSION-1.0}"
 VERSION_PATTERN='^[0-9]+\.[0-9]+(\.[0-9]+)?$'
 if [[ ! "$VERSION" =~ $VERSION_PATTERN ]]; then
     echo "error: ZOOMIT_VERSION must be a dotted numeric version such as 1.0 or 1.0.0 (got '$VERSION')." >&2
+    exit 2
+fi
+BUILD_NUMBER="${ZOOMIT_BUILD_NUMBER:-$VERSION}"
+BUILD_NUMBER_PATTERN='^[0-9]+(\.[0-9]+){0,2}$'
+if [[ ! "$BUILD_NUMBER" =~ $BUILD_NUMBER_PATTERN ]]; then
+    echo "error: ZOOMIT_BUILD_NUMBER must contain one to three numeric components (got '$BUILD_NUMBER')." >&2
     exit 2
 fi
 case "${ZOOMIT_REQUIRE_RELEASE_VERSION:-false}" in
@@ -82,8 +103,8 @@ if (( ${#arch_flags} > 0 )) && ! xcodebuild -version >/dev/null 2>&1; then
     arch_flags=()
 fi
 
-swift build -c "$CONFIGURATION" $arch_flags
-BIN_DIR="$(swift build -c "$CONFIGURATION" $arch_flags --show-bin-path)"
+swift build -c "$CONFIGURATION" $arch_flags $distribution_swift_flags
+BIN_DIR="$(swift build -c "$CONFIGURATION" $arch_flags $distribution_swift_flags --show-bin-path)"
 
 rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
@@ -150,7 +171,7 @@ cat > "$APP_PATH/Contents/Info.plist" <<PLIST
     <key>CFBundleShortVersionString</key>
     <string>$VERSION</string>
     <key>CFBundleVersion</key>
-    <string>$VERSION</string>
+    <string>$BUILD_NUMBER</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
@@ -159,6 +180,8 @@ cat > "$APP_PATH/Contents/Info.plist" <<PLIST
     <string>ZoomIt shows your webcam as a picture-in-picture overlay when you enable it for screen recordings.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>ZoomIt records your microphone when you enable microphone capture for screen recordings.</string>
+    <key>ZoomItDistribution</key>
+    <string>$DIST_DISTRIBUTION</string>
 </dict>
 </plist>
 PLIST
@@ -191,5 +214,7 @@ echo "$APP_PATH"
 echo "  bundle id:    $BUNDLE_ID" >&2
 echo "  display name: $DISPLAY_NAME" >&2
 echo "  version:      $VERSION" >&2
+echo "  build:        $BUILD_NUMBER" >&2
+echo "  distribution: $DIST_DISTRIBUTION" >&2
 echo "  signed with:  $SIGN_DESC" >&2
 echo "  architectures: $(lipo -archs "$APP_PATH/Contents/MacOS/ZoomIt" 2>/dev/null || echo unknown)" >&2

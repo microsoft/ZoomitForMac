@@ -1,3 +1,4 @@
+#if !ZOOMIT_APP_STORE
 import AppKit
 import Carbon.HIToolbox
 
@@ -570,3 +571,4 @@ final class DemoTypeController {
         alert.runModal()
     }
 }
+#endif

@@ -56,6 +56,12 @@ swift run ZoomIt
 
 The self-test covers viewport math, annotation lifecycle/rendering, settings persistence, and panorama stitcher regressions.
 
+Run the sandbox product-surface tests with the App Store compiler condition:
+
+```sh
+swift run -Xswiftc -DZOOMIT_APP_STORE ZoomItMacSelfTest
+```
+
 Launch at login requires running ZoomIt as an app bundle so macOS attributes the login item to ZoomIt instead of the host process used for development. Build the bundle with:
 
 ```sh
@@ -135,6 +141,39 @@ The official Azure DevOps build supplies `ZOOMIT_VERSION` from the version
 entered when the pipeline is queued. Values must contain two or three numeric
 components, such as `1.2` or `1.2.0`; malformed values fail before compilation
 or signing begins.
+
+## Build Variants
+
+One source tree produces the standard unsandboxed application and the sandboxed
+product surface used for Mac App Store releases.
+
+| Variant | Product surface |
+| --- | --- |
+| Homebrew | Unsandboxed, including DemoType |
+| Mac App Store | App Sandbox; DemoType is compiled out |
+
+`ZOOMIT_DISTRIBUTION` selects the channel and defaults to `homebrew`, preserving
+the existing local build command. `ZOOMIT_BUILD_NUMBER` independently stamps a
+numeric `CFBundleVersion` when a specific local value is needed.
+
+```sh
+# Existing contributor/Homebrew behavior
+zsh Scripts/build-app.sh release
+
+# Explicit Homebrew variant
+ZOOMIT_DISTRIBUTION=homebrew ZOOMIT_BUILD_NUMBER=101 \
+  zsh Scripts/build-app.sh release
+
+# Sandboxed local prototype (still uses the separate contributor identity)
+ZOOMIT_DISTRIBUTION=appstore ZOOMIT_BUILD_NUMBER=101 \
+  zsh Scripts/build-app.sh release
+```
+
+The App Store variant uses security-scoped bookmarks for the selected break
+sound, break background, and automatic snip folder. Re-select a resource in
+Settings if macOS reports that its authorization can no longer be restored.
+Screen recording remains controlled by macOS privacy consent and has no app
+entitlement. 
 
 By default this produces `.build/ZoomIt (Dev).app` with the app icon, bundled resources, and an `Info.plist` declaring the microphone and camera usage descriptions. `release` builds are **Universal** (Apple Silicon + Intel) by default; `debug` builds are native to the build machine for speed. Override the architectures with `ZOOMIT_ARCHS` (e.g. `ZOOMIT_ARCHS=arm64`). A Universal build routes through Xcode's build system, so it requires a **full Xcode** install — with only the Command Line Tools the script warns and falls back to a native build. The build summary prints the resulting architectures.
 

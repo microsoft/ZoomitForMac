@@ -18,8 +18,19 @@ enum AppCommand: Equatable {
     case snipOcr
     case startPanorama(save: Bool)
     case toggleRecording(region: Bool)
+    #if !ZOOMIT_APP_STORE
     case startDemoType
     case resetDemoType
+    #endif
     case toggleBreakTimer
+    case toggleDemoMirror(scope: DemoMirrorScope)
     case exit
+}
+
+/// What DemoMirror mirrors onto the second monitor: the entire source screen,
+/// a user-selected region of it, or the window under the cursor.
+enum DemoMirrorScope: Equatable {
+    case screen
+    case region
+    case window
 }

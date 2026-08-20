@@ -7,6 +7,7 @@ private final class OverlayWindow: NSWindow {
 
 @MainActor
 final class OverlayWindowController {
+    private let userSelectedResourceAccess: UserSelectedResourceAccess
     private var window: NSWindow?
     private weak var canvasView: ZoomCanvasView?
     private var viewportController: ZoomViewportController?
@@ -18,6 +19,10 @@ final class OverlayWindowController {
     // real animation is more deliberate. Use ~33ms (≈30fps) to match that feel
     // while keeping ZoomIt's 1.1x/0.8x per-step factors.
     private static let zoomStepInterval: TimeInterval = 1.0 / 30.0
+
+    init(userSelectedResourceAccess: UserSelectedResourceAccess) {
+        self.userSelectedResourceAccess = userSelectedResourceAccess
+    }
 
     func show(
         frame capturedFrame: CapturedFrame,
@@ -59,6 +64,7 @@ final class OverlayWindowController {
             viewportController: viewportController,
             annotationController: annotationController,
             smoothImage: smoothImage,
+            userSelectedResourceAccess: userSelectedResourceAccess,
             commandSink: commandSink
         )
         window.contentView = canvasView

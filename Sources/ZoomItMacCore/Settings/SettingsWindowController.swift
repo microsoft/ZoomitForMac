@@ -20,7 +20,7 @@ private final class LinkButton: NSButton {
 /// exposing the Zoom, Draw, and Type settings that ZoomIt supports. Each tab
 /// carries the same kind of descriptive help text the Windows dialog shows.
 @MainActor
-final class SettingsWindowController: NSObject, NSWindowDelegate {
+final class SettingsWindowController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate {
     private let settingsStore: SettingsStore
     private let onHotKeyChange: () -> Void
     private let onSuspendHotkeys: () -> Void
@@ -28,14 +28,25 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let onRequestMicrophone: () -> Void
     private let onRequestCamera: () -> Void
     private let onOpenTrimEditor: () -> Void
+    private let userSelectedResourceAccess: UserSelectedResourceAccess
     private var settings: AppSettings
 
     private static let homepageURLString = "http://www.sysinternals.com"
-    private static let contentWidth: CGFloat = 620
+    private static let contentWidth: CGFloat = 540
     private static let panelHorizontalInset: CGFloat = 28
     private static let wrappedLabelWidth: CGFloat = contentWidth - panelHorizontalInset * 2
 
     private var window: NSWindow?
+    /// The pane content switcher. Its own tab strip is hidden; selection is
+    /// driven by the sidebar list (see `makeWindow`).
+    private weak var settingsTabView: NSTabView?
+    /// The source-list sidebar that selects the visible pane.
+    private weak var sidebarTableView: NSTableView?
+    private static let sidebarWidth: CGFloat = 190
+    private static let sidebarRowHeight: CGFloat = 28
+    /// Vertical room reserved in the sidebar for the product/copyright/link
+    /// footer beneath the pane list.
+    private static let sidebarFooterAllowance: CGFloat = 90
 
     // Type tab controls.
     private weak var fontSampleLabel: NSTextField?
@@ -51,8 +62,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private weak var snipSaveDirectoryField: NSTextField?
     private weak var snipSaveDirectoryBrowseButton: NSButton?
 
+    #if !ZOOMIT_APP_STORE
     // DemoType tab controls.
     private weak var demoTypeFileField: NSTextField?
+    #endif
 
     // Webcam controls.
     private weak var webcamDevicePopup: NSPopUpButton?
@@ -77,8 +90,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         case snip
         case snipOcr
         case record
+        #if !ZOOMIT_APP_STORE
         case demoType
+        #endif
         case panorama
+        case demoMirror
     }
     private weak var hotKeyButton: NSButton?
     private weak var drawHotKeyButton: NSButton?
@@ -87,8 +103,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private weak var snipHotKeyButton: NSButton?
     private weak var snipOcrHotKeyButton: NSButton?
     private weak var recordHotKeyButton: NSButton?
+    #if !ZOOMIT_APP_STORE
     private weak var demoTypeHotKeyButton: NSButton?
+    #endif
     private weak var panoramaHotKeyButton: NSButton?
+    private weak var demoMirrorHotKeyButton: NSButton?
+    private weak var demoMirrorTrackWindowCheckbox: NSButton?
     private var hotKeyMonitor: Any?
     private var recordingTarget: HotKeyTarget?
 
@@ -99,7 +119,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         onResumeHotkeys: @escaping () -> Void,
         onRequestMicrophone: @escaping () -> Void,
         onRequestCamera: @escaping () -> Void,
-        onOpenTrimEditor: @escaping () -> Void
+        onOpenTrimEditor: @escaping () -> Void,
+        userSelectedResourceAccess: UserSelectedResourceAccess
     ) {
         self.settingsStore = settingsStore
         self.onHotKeyChange = onHotKeyChange
@@ -108,6 +129,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.onRequestMicrophone = onRequestMicrophone
         self.onRequestCamera = onRequestCamera
         self.onOpenTrimEditor = onOpenTrimEditor
+        self.userSelectedResourceAccess = userSelectedResourceAccess
         self.settings = settingsStore.load()
         super.init()
     }
@@ -128,8 +150,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         snipHotKeyButton?.title = snipHotKeyDisplayString()
         snipOcrHotKeyButton?.title = snipOcrHotKeyDisplayString()
         recordHotKeyButton?.title = recordHotKeyDisplayString()
+        #if !ZOOMIT_APP_STORE
         demoTypeHotKeyButton?.title = demoTypeHotKeyDisplayString()
+        #endif
         panoramaHotKeyButton?.title = panoramaHotKeyDisplayString()
+        demoMirrorHotKeyButton?.title = demoMirrorHotKeyDisplayString()
         launchAtLoginCheckbox?.state = settings.launchAtLogin ? .on : .off
         NSApp.activate(ignoringOtherApps: true)
         window.center()
@@ -146,10 +171,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     /// The Options dialog tabs, in order. Zoom and Live Zoom are separate tabs
     /// (matching Windows ZoomIt, whose Zoom tab holds static-zoom settings only).
-    static let settingsTabTitles = [
-        "General", "Zoom", "Live Zoom", "Draw", "Type",
-        "DemoType", "Break", "Snip", "Record", "Panorama"
-    ]
+    static var settingsTabTitles: [String] {
+        var titles = ["General", "Zoom", "Live Zoom", "Draw", "Type"]
+        #if !ZOOMIT_APP_STORE
+        titles.append("DemoType")
+        #endif
+        titles.append(contentsOf: ["Break", "Snip", "Record", "Panorama", "DemoMirror"])
+        return titles
+    }
 
     private func viewForTab(_ title: String) -> NSView {
         switch title {
@@ -158,11 +187,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         case "Live Zoom": return makeLiveZoomTab()
         case "Draw": return makeDrawTab()
         case "Type": return makeTypeTab()
+        #if !ZOOMIT_APP_STORE
         case "DemoType": return makeDemoTypeTab()
+        #endif
         case "Break": return makeBreakTab()
         case "Snip": return makeSnipTab()
         case "Record": return makeRecordTab()
         case "Panorama": return makePanoramaTab()
+        case "DemoMirror": return makeDemoMirrorTab()
         default: return NSView()
         }
     }
@@ -192,6 +224,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let tabView = NSTabView()
         tabView.translatesAutoresizingMaskIntoConstraints = false
+        // The native tab strip is a single row that can't wrap, and with 11
+        // tabs it no longer fits the window's width. Hide it (keeping the
+        // bezel border around the content) and drive selection from a custom
+        // two-row button bar built below instead.
+        tabView.tabViewType = .noTabsBezelBorder
         for (label, content) in tabs {
             // The holder is frame-managed so NSTabView resizes it to fill the
             // content area; the content is pinned to the holder's top so every
@@ -223,8 +260,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             tabView.widthAnchor.constraint(equalToConstant: Self.contentWidth + chromeWidth),
             tabView.heightAnchor.constraint(equalToConstant: tabContentHeight + chromeHeight)
         ])
+        settingsTabView = tabView
 
-        let outer = NSStackView(views: [tabView, makeFooter()])
+        let outer = NSStackView(views: [tabView])
         outer.orientation = .vertical
         outer.alignment = .centerX
         outer.spacing = 12
@@ -247,16 +285,87 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             defer: false
         )
         window.title = "ZoomIt - Sysinternals: www.sysinternals.com"
-        window.contentView = container
+        window.contentViewController = makeSplitViewController(content: container)
         window.isReleasedWhenClosed = false
         window.delegate = self
         Self.configureAlwaysOnTop(window)
 
-        // Size the window to fit the (now equal-height) tabs plus the footer.
+        // Size the window to fit the tallest pane, leaving room for the sidebar
+        // alongside it and keeping it tall enough that the sidebar's full pane
+        // list and its footer fit without scrolling.
         container.layoutSubtreeIfNeeded()
         let fitting = container.fittingSize
-        window.setContentSize(NSSize(width: max(fitting.width, 480), height: max(fitting.height, 360)))
+        let sidebarNeededHeight = CGFloat(Self.settingsTabTitles.count) * Self.sidebarRowHeight
+            + Self.sidebarFooterAllowance
+        window.setContentSize(NSSize(
+            width: max(fitting.width + Self.sidebarWidth, 480),
+            height: max(fitting.height, sidebarNeededHeight, 360)
+        ))
         return window
+    }
+
+    /// Presents the panes with a source-list sidebar, the same arrangement
+    /// System Settings uses. A sidebar keeps all panes visible at once; the
+    /// preferences toolbar this replaced pushed the last few into an overflow
+    /// menu once there were too many to fit the window's width.
+    private func makeSplitViewController(content: NSView) -> NSSplitViewController {
+        let sidebarController = NSViewController()
+        sidebarController.view = makeSidebarView()
+
+        let contentController = NSViewController()
+        contentController.view = content
+
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarController)
+        sidebarItem.canCollapse = false
+        sidebarItem.minimumThickness = Self.sidebarWidth
+        sidebarItem.maximumThickness = Self.sidebarWidth
+
+        let splitViewController = NSSplitViewController()
+        splitViewController.addSplitViewItem(sidebarItem)
+        splitViewController.addSplitViewItem(NSSplitViewItem(viewController: contentController))
+        return splitViewController
+    }
+
+    private func makeSidebarView() -> NSView {
+        let tableView = NSTableView()
+        tableView.headerView = nil
+        tableView.style = .sourceList
+        tableView.rowHeight = Self.sidebarRowHeight
+        tableView.selectionHighlightStyle = .regular
+        tableView.allowsEmptySelection = false
+        tableView.dataSource = self
+        tableView.delegate = self
+
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("pane"))
+        column.resizingMask = .autoresizingMask
+        tableView.addTableColumn(column)
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = tableView
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.automaticallyAdjustsContentInsets = true
+
+        sidebarTableView = tableView
+        tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+
+        // The product/copyright/link block sits at the foot of the sidebar.
+        let footer = makeFooter(maxWidth: Self.sidebarWidth - 16)
+        let container = NSView()
+        container.addSubview(scrollView)
+        container.addSubview(footer)
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        footer.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: container.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            footer.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: 8),
+            footer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            footer.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            footer.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12)
+        ])
+        return container
     }
 
     /// Configures the settings window to behave like the Windows Options dialog:
@@ -275,7 +384,73 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         return item
     }
 
-    private func makeFooter() -> NSView {
+    /// Returns the SF Symbol shown beside each pane's name in the sidebar.
+    static func paneSymbolName(for title: String) -> String {
+        switch title {
+        case "General": return "gearshape"
+        case "Zoom": return "plus.magnifyingglass"
+        case "Live Zoom": return "magnifyingglass.circle"
+        case "Draw": return "pencil.tip"
+        case "Type": return "textformat"
+        case "DemoType": return "keyboard"
+        case "Break": return "timer"
+        case "Snip": return "camera.viewfinder"
+        case "Record": return "record.circle"
+        case "Panorama": return "pano"
+        case "DemoMirror": return "rectangle.on.rectangle"
+        default: return "square"
+        }
+    }
+
+    // MARK: - Sidebar list
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        Self.settingsTabTitles.count
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard Self.settingsTabTitles.indices.contains(row) else { return nil }
+        let title = Self.settingsTabTitles[row]
+
+        let imageView = NSImageView(
+            image: NSImage(
+                systemSymbolName: Self.paneSymbolName(for: title),
+                accessibilityDescription: nil
+            ) ?? NSImage()
+        )
+        imageView.contentTintColor = .controlAccentColor
+        imageView.widthAnchor.constraint(equalToConstant: 18).isActive = true
+
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: NSFont.systemFontSize)
+        label.lineBreakMode = .byTruncatingTail
+
+        let stack = NSStackView(views: [imageView, label])
+        stack.orientation = .horizontal
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 4, bottom: 0, right: 4)
+
+        let cell = NSTableCellView()
+        cell.addSubview(stack)
+        cell.textField = label
+        cell.imageView = imageView
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: cell.trailingAnchor),
+            stack.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+        ])
+        return cell
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard let sidebarTableView, let settingsTabView else { return }
+        let row = sidebarTableView.selectedRow
+        guard settingsTabView.tabViewItems.indices.contains(row) else { return }
+        settingsTabView.selectTabViewItem(at: row)
+    }
+
+    private func makeFooter(maxWidth: CGFloat) -> NSView {
         let title = makeLabel("\(AppInfo.productName) \(AppInfo.version)")
         title.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         title.textColor = .secondaryLabelColor
@@ -285,6 +460,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         copyright.font = NSFont.systemFont(ofSize: 11)
         copyright.textColor = .secondaryLabelColor
         copyright.alignment = .center
+
+        // The sidebar is much narrower than the pane area the footer used to
+        // sit under, so let the product and copyright lines wrap to fit it.
+        for label in [title, copyright] {
+            label.lineBreakMode = .byWordWrapping
+            label.maximumNumberOfLines = 0
+            label.preferredMaxLayoutWidth = maxWidth
+        }
 
         let link = makeLink(title: "www.sysinternals.com")
 
@@ -545,12 +728,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         beginRecording(target: .record, sender: sender)
     }
 
+    #if !ZOOMIT_APP_STORE
     @objc private func toggleDemoTypeHotKeyRecording(_ sender: NSButton) {
         beginRecording(target: .demoType, sender: sender)
     }
+    #endif
 
     @objc private func togglePanoramaHotKeyRecording(_ sender: NSButton) {
         beginRecording(target: .panorama, sender: sender)
+    }
+
+    @objc private func toggleDemoMirrorHotKeyRecording(_ sender: NSButton) {
+        beginRecording(target: .demoMirror, sender: sender)
     }
 
     private func beginRecording(target: HotKeyTarget, sender: NSButton) {
@@ -594,7 +783,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             if conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
                 conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
-                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoMirror(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -604,7 +794,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
                 conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
-                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoMirror(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -614,7 +805,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
                 conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
-                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoMirror(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -627,7 +819,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 conflictsWithSnip(code: newCode, modifiers: newModifiers) ||
                 conflictsWithRecord(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDemoType(code: newCode, modifiers: newModifiers) ||
-                conflictsWithPanorama(code: newCode, modifiers: newModifiers) {
+                conflictsWithPanorama(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoMirror(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -638,7 +831,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
                 conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
-                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoMirror(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -650,7 +844,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
                 conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
                 conflictsWithSnip(code: newCode, modifiers: newModifiers) ||
-                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoMirror(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
@@ -661,12 +856,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
                 conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
-                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoMirror(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
             settings.recordHotKeyCode = newCode
             settings.recordHotKeyModifiers = newModifiers
+        #if !ZOOMIT_APP_STORE
         case .demoType:
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
@@ -675,23 +872,41 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 conflictsWithSnip(code: newCode, modifiers: newModifiers) ||
                 conflictsWithSnipOcr(code: newCode, modifiers: newModifiers) ||
                 conflictsWithRecord(code: newCode, modifiers: newModifiers) ||
-                conflictsWithPanorama(code: newCode, modifiers: newModifiers) {
+                conflictsWithPanorama(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoMirror(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
             settings.demoTypeHotKeyCode = newCode
             settings.demoTypeHotKeyModifiers = newModifiers
+        #endif
         case .panorama:
             if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
                 conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
                 conflictsWithLive(code: newCode, modifiers: newModifiers) ||
                 conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
-                conflictsWithDemoType(code: newCode, modifiers: newModifiers) {
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoMirror(code: newCode, modifiers: newModifiers) {
                 NSSound.beep()
                 return nil
             }
             settings.panoramaHotKeyCode = newCode
             settings.panoramaHotKeyModifiers = newModifiers
+        case .demoMirror:
+            if conflictsWithZoom(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDraw(code: newCode, modifiers: newModifiers) ||
+                conflictsWithLive(code: newCode, modifiers: newModifiers) ||
+                conflictsWithBreak(code: newCode, modifiers: newModifiers) ||
+                conflictsWithSnip(code: newCode, modifiers: newModifiers) ||
+                conflictsWithSnipOcr(code: newCode, modifiers: newModifiers) ||
+                conflictsWithRecord(code: newCode, modifiers: newModifiers) ||
+                conflictsWithDemoType(code: newCode, modifiers: newModifiers) ||
+                conflictsWithPanorama(code: newCode, modifiers: newModifiers) {
+                NSSound.beep()
+                return nil
+            }
+            settings.demoMirrorHotKeyCode = newCode
+            settings.demoMirrorHotKeyModifiers = newModifiers
         case nil:
             return nil
         }
@@ -731,12 +946,20 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func conflictsWithDemoType(code: Int, modifiers: UInt) -> Bool {
+        #if ZOOMIT_APP_STORE
+        false
+        #else
         settings.demoTypeHotKeyCode != 0 &&
             code == settings.demoTypeHotKeyCode && modifiers == settings.demoTypeHotKeyModifiers
+        #endif
     }
 
     private func conflictsWithPanorama(code: Int, modifiers: UInt) -> Bool {
         code == settings.panoramaHotKeyCode && modifiers == settings.panoramaHotKeyModifiers
+    }
+
+    private func conflictsWithDemoMirror(code: Int, modifiers: UInt) -> Bool {
+        code == settings.demoMirrorHotKeyCode && modifiers == settings.demoMirrorHotKeyModifiers
     }
 
     private func finishRecording() {
@@ -759,8 +982,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         snipHotKeyButton?.title = snipHotKeyDisplayString()
         snipOcrHotKeyButton?.title = snipOcrHotKeyDisplayString()
         recordHotKeyButton?.title = recordHotKeyDisplayString()
+        #if !ZOOMIT_APP_STORE
         demoTypeHotKeyButton?.title = demoTypeHotKeyDisplayString()
+        #endif
         panoramaHotKeyButton?.title = panoramaHotKeyDisplayString()
+        demoMirrorHotKeyButton?.title = demoMirrorHotKeyDisplayString()
     }
 
     private func zoomHotKeyDisplayString() -> String {
@@ -792,13 +1018,19 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         Self.describe(keyCode: settings.recordHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.recordHotKeyModifiers))
     }
 
+    #if !ZOOMIT_APP_STORE
     private func demoTypeHotKeyDisplayString() -> String {
         guard settings.demoTypeHotKeyCode != 0 else { return "None" }
         return Self.describe(keyCode: settings.demoTypeHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.demoTypeHotKeyModifiers))
     }
+    #endif
 
     private func panoramaHotKeyDisplayString() -> String {
         Self.describe(keyCode: settings.panoramaHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.panoramaHotKeyModifiers))
+    }
+
+    private func demoMirrorHotKeyDisplayString() -> String {
+        Self.describe(keyCode: settings.demoMirrorHotKeyCode, modifiers: NSEvent.ModifierFlags(rawValue: settings.demoMirrorHotKeyModifiers))
     }
 
     // MARK: - Draw tab
@@ -1050,6 +1282,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         panel.allowedContentTypes = [.audio]
         panel.title = "ZoomIt: Specify Sound File"
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard saveSelection(url, for: .breakSound) else { return }
         settings.breakSoundFile = url.path
         breakSoundFileField?.stringValue = url.path
         persist()
@@ -1068,6 +1301,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         panel.allowedContentTypes = [.image]
         panel.title = "ZoomIt: Specify Background File"
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard saveSelection(url, for: .breakBackground) else { return }
         settings.breakBackgroundFile = url.path
         breakBackgroundFileField?.stringValue = url.path
         persist()
@@ -1178,6 +1412,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         panel.prompt = "Choose"
         panel.title = "ZoomIt: Choose Snip Folder"
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard saveSelection(url, for: .snipDirectory) else { return }
         settings.snipSaveDirectory = url.path
         snipSaveDirectoryField?.stringValue = url.path
         persist()
@@ -1259,6 +1494,41 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let panoramaHotKeyRow = makeRow([makeLabel("Panorama Toggle:"), panoramaHotKeyButton])
 
         return makeColumn([help, panoramaHotKeyRow])
+    }
+
+    // MARK: - DemoMirror tab
+
+    private func makeDemoMirrorTab() -> NSView {
+        let help = makeLabel(
+            "DemoMirror mirrors the screen, a region of the screen, or a window, including the mouse pointer, onto a second monitor. Use it to show a demo app on the presentation monitor, on top of the slide show, without leaving the presentation.",
+            wraps: true
+        )
+
+        let shortcutHelp = makeLabel(
+            "Enter the hotkey to mirror the entire screen, enter it with the Shift key to select a region to mirror, or with the Option key to mirror the window under the cursor. Enter the hotkey again to stop mirroring.",
+            wraps: true
+        )
+
+        let demoMirrorHotKeyButton = NSButton(title: demoMirrorHotKeyDisplayString(), target: self, action: #selector(toggleDemoMirrorHotKeyRecording(_:)))
+        demoMirrorHotKeyButton.bezelStyle = .rounded
+        demoMirrorHotKeyButton.setButtonType(.momentaryPushIn)
+        demoMirrorHotKeyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+        self.demoMirrorHotKeyButton = demoMirrorHotKeyButton
+        let demoMirrorHotKeyRow = makeRow([makeLabel("Mirror Toggle:"), demoMirrorHotKeyButton])
+
+        let trackWindowHelp = makeLabel(
+            "When mirroring a window, DemoMirror can track the window's screen region so ZoomIt zoom and draw show in place. Uncheck to mirror the window's surface directly, unaffected by overlapping windows.",
+            wraps: true
+        )
+        let trackWindowCheck = makeCheckbox("Track window region:", action: #selector(demoMirrorTrackWindowChanged(_:)), state: settings.demoMirrorTrackWindowRegion)
+        demoMirrorTrackWindowCheckbox = trackWindowCheck
+
+        return makeColumn([help, shortcutHelp, demoMirrorHotKeyRow, trackWindowHelp, trackWindowCheck])
+    }
+
+    @objc private func demoMirrorTrackWindowChanged(_ sender: NSButton) {
+        settings.demoMirrorTrackWindowRegion = (sender.state == .on)
+        persist()
     }
 
     @objc private func recordSystemAudioChanged(_ sender: NSButton) {
@@ -1463,6 +1733,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         persist()
     }
 
+    #if !ZOOMIT_APP_STORE
     // MARK: - DemoType tab
 
     private func makeDemoTypeTab() -> NSView {
@@ -1527,11 +1798,25 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         settings.demoTypeUserDriven = sender.state == .on
         persist()
     }
+    #endif
 
     // MARK: - Persistence
 
     private func persist() {
         settingsStore.save(settings)
+    }
+
+    private func saveSelection(_ url: URL, for resource: UserSelectedResource) -> Bool {
+        do {
+            try userSelectedResourceAccess.saveSelection(url, for: resource)
+            return true
+        } catch {
+            if DistributionChannel.isAppStore {
+                NSAlert(error: error).runModal()
+                return false
+            }
+            return true
+        }
     }
 
     // MARK: - Key formatting

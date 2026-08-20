@@ -202,6 +202,7 @@ final class SnipController {
     private let displayManager: DisplayManager
     private let permissionService: PermissionService
     private let settingsStore: SettingsStore
+    private let userSelectedResourceAccess: UserSelectedResourceAccess
 
     private var window: NSWindow?
     private var capturedFrame: CapturedFrame?
@@ -213,12 +214,14 @@ final class SnipController {
         captureService: ScreenCaptureService,
         displayManager: DisplayManager,
         permissionService: PermissionService,
-        settingsStore: SettingsStore
+        settingsStore: SettingsStore,
+        userSelectedResourceAccess: UserSelectedResourceAccess
     ) {
         self.captureService = captureService
         self.displayManager = displayManager
         self.permissionService = permissionService
         self.settingsStore = settingsStore
+        self.userSelectedResourceAccess = userSelectedResourceAccess
     }
 
     /// Begins a region selection. `action` chooses what to do with the selected
@@ -314,7 +317,11 @@ final class SnipController {
 
         switch action {
         case .saveImage:
-            ImageExporter.saveImage(cropped, settings: settingsStore.load())
+            ImageExporter.saveImage(
+                cropped,
+                settings: settingsStore.load(),
+                userSelectedResourceAccess: userSelectedResourceAccess
+            )
         case .copyImage:
             ImageExporter.copyToPasteboard(cropped)
         case .recognizeText:

@@ -50,6 +50,7 @@ final class PanoramaController {
     private let displayManager: DisplayManager
     private let permissionService: PermissionService
     private let settingsStore: SettingsStore
+    private let userSelectedResourceAccess: UserSelectedResourceAccess
 
     private(set) var isCapturing = false
     private var stopRequested = false
@@ -86,11 +87,13 @@ final class PanoramaController {
     init(
         displayManager: DisplayManager,
         permissionService: PermissionService,
-        settingsStore: SettingsStore
+        settingsStore: SettingsStore,
+        userSelectedResourceAccess: UserSelectedResourceAccess
     ) {
         self.displayManager = displayManager
         self.permissionService = permissionService
         self.settingsStore = settingsStore
+        self.userSelectedResourceAccess = userSelectedResourceAccess
     }
 
     /// Toggles panorama capture. The first call selects a region and begins
@@ -323,7 +326,11 @@ final class PanoramaController {
         }
 
         if save {
-            ImageExporter.saveImage(cgImage, settings: settingsStore.load()) { [weak self] in
+            ImageExporter.saveImage(
+                cgImage,
+                settings: settingsStore.load(),
+                userSelectedResourceAccess: userSelectedResourceAccess
+            ) { [weak self] in
                 self?.onWillShowSaveDialog?()
             }
             return "Panorama ready to save"

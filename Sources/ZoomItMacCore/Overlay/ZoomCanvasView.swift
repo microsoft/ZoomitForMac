@@ -5,6 +5,7 @@ final class ZoomCanvasView: NSView {
     private var capturedFrame: CapturedFrame
     private let viewportController: ZoomViewportController
     private let annotationController: AnnotationController
+    private let userSelectedResourceAccess: UserSelectedResourceAccess
     private let commandSink: (AppCommand) -> Void
     private var latestCursorLocation: CGPoint?
     private var pointerViewPoint: CGPoint = .zero
@@ -86,12 +87,14 @@ final class ZoomCanvasView: NSView {
         viewportController: ZoomViewportController,
         annotationController: AnnotationController,
         smoothImage: Bool,
+        userSelectedResourceAccess: UserSelectedResourceAccess,
         commandSink: @escaping (AppCommand) -> Void
     ) {
         self.capturedFrame = capturedFrame
         self.viewportController = viewportController
         self.annotationController = annotationController
         self.smoothImage = smoothImage
+        self.userSelectedResourceAccess = userSelectedResourceAccess
         self.commandSink = commandSink
         super.init(frame: frameRect)
         // Anchor the initial zoom on the current cursor position so the view
@@ -803,8 +806,13 @@ final class ZoomCanvasView: NSView {
             ImageExporter.copyToPasteboard(image)
         }
         if settings.saveSnipToDirectory {
-            ImageExporter.writeToDirectory(image, directoryPath: settings.snipSaveDirectory)
-            return
+            if ImageExporter.writeToDirectory(
+                image,
+                directoryPath: settings.snipSaveDirectory,
+                userSelectedResourceAccess: userSelectedResourceAccess
+            ) {
+                return
+            }
         }
         let savedLevel = window?.level
         let wasCursorHidden = cursorHidden

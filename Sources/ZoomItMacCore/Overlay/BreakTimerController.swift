@@ -8,6 +8,7 @@ private final class BreakTimerWindow: NSWindow {
 enum BreakTimerError: LocalizedError {
     case noDisplay
     case backgroundImageUnavailable(String)
+    case resourceAccessFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -15,6 +16,8 @@ enum BreakTimerError: LocalizedError {
             "The active display could not be found."
         case .backgroundImageUnavailable(let path):
             "The break timer background image could not be loaded: \(path)"
+        case .resourceAccessFailed(let description):
+            description
         }
     }
 }
@@ -74,6 +77,7 @@ final class BreakTimerController {
     private let displayManager: DisplayManager
     private let captureService: ScreenCaptureService
     private let settingsStore: SettingsStore
+    private let userSelectedResourceAccess: UserSelectedResourceAccess
     private var window: NSWindow?
     private weak var timerView: BreakTimerView?
     private var onFinished: (() -> Void)?
@@ -81,10 +85,16 @@ final class BreakTimerController {
     /// is on screen, matching Windows ZoomIt.
     private let idleSleepAssertion = IdleSleepAssertion()
 
-    init(displayManager: DisplayManager, captureService: ScreenCaptureService, settingsStore: SettingsStore) {
+    init(
+        displayManager: DisplayManager,
+        captureService: ScreenCaptureService,
+        settingsStore: SettingsStore,
+        userSelectedResourceAccess: UserSelectedResourceAccess
+    ) {
         self.displayManager = displayManager
         self.captureService = captureService
         self.settingsStore = settingsStore
+        self.userSelectedResourceAccess = userSelectedResourceAccess
     }
 
     var isActive: Bool { window != nil }
@@ -116,6 +126,7 @@ final class BreakTimerController {
             frame: CGRect(origin: .zero, size: display.frame.size),
             settings: settings,
             backgroundImage: backgroundImage,
+            userSelectedResourceAccess: userSelectedResourceAccess,
             onSettingsChanged: { [weak self] updated in
                 self?.persistRuntimeSettings(updated)
             },
@@ -166,12 +177,26 @@ final class BreakTimerController {
             image.isTemplate = false
             return image
         case 2:
-            guard !settings.breakBackgroundFile.isEmpty,
-                  let image = NSImage(contentsOfFile: settings.breakBackgroundFile) else {
+            guard !settings.breakBackgroundFile.isEmpty else {
                 throw BreakTimerError.backgroundImageUnavailable(settings.breakBackgroundFile)
             }
-            image.isTemplate = false
-            return image
+            do {
+                return try userSelectedResourceAccess.withAccess(
+                    to: .breakBackground,
+                    legacyPath: settings.breakBackgroundFile
+                ) { url in
+                    let data = try Data(contentsOf: url)
+                    guard let image = NSImage(data: data) else {
+                        throw BreakTimerError.backgroundImageUnavailable(settings.breakBackgroundFile)
+                    }
+                    image.isTemplate = false
+                    return image
+                }
+            } catch let error as BreakTimerError {
+                throw error
+            } catch {
+                throw BreakTimerError.resourceAccessFailed(error.localizedDescription)
+            }
         default:
             return nil
         }
@@ -189,6 +214,7 @@ final class BreakTimerController {
 private final class BreakTimerView: NSView {
     private var settings: AppSettings
     private let backgroundImage: NSImage?
+    private let userSelectedResourceAccess: UserSelectedResourceAccess
     private let onSettingsChanged: (AppSettings) -> Void
     private let onClose: () -> Void
     private var timer: Timer?
@@ -202,11 +228,13 @@ private final class BreakTimerView: NSView {
         frame frameRect: NSRect,
         settings: AppSettings,
         backgroundImage: NSImage?,
+        userSelectedResourceAccess: UserSelectedResourceAccess,
         onSettingsChanged: @escaping (AppSettings) -> Void,
         onClose: @escaping () -> Void
     ) {
         self.settings = settings
         self.backgroundImage = backgroundImage
+        self.userSelectedResourceAccess = userSelectedResourceAccess
         self.onSettingsChanged = onSettingsChanged
         self.onClose = onClose
         self.remainingSeconds = max(1, min(settings.breakDurationMinutes, 99)) * 60
@@ -303,7 +331,16 @@ private final class BreakTimerView: NSView {
         if remainingSeconds == 0, settings.breakPlaySound, !playedSoundAtZero {
             playedSoundAtZero = true
             if !settings.breakSoundFile.isEmpty {
-                NSSound(contentsOfFile: settings.breakSoundFile, byReference: true)?.play()
+                do {
+                    try userSelectedResourceAccess.withAccess(
+                        to: .breakSound,
+                        legacyPath: settings.breakSoundFile
+                    ) { url in
+                        NSSound(contentsOf: url, byReference: false)?.play()
+                    }
+                } catch {
+                    NSSound.beep()
+                }
             } else {
                 NSSound.beep()
             }

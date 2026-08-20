@@ -53,6 +53,16 @@ struct AppSettings: Equatable {
     /// to a file instead.
     var panoramaHotKeyCode: Int
     var panoramaHotKeyModifiers: UInt
+    /// Virtual key code and modifier-flag raw value for the global DemoMirror
+    /// hotkey. The base shortcut mirrors the entire screen; the same shortcut
+    /// with Shift toggled selects a region to mirror, and with Option toggled
+    /// mirrors the window under the cursor.
+    var demoMirrorHotKeyCode: Int
+    var demoMirrorHotKeyModifiers: UInt
+    /// When mirroring a window, whether DemoMirror tracks the window's screen
+    /// region (so ZoomIt zoom/draw overlays show in the mirror) instead of
+    /// mirroring the window's surface directly.
+    var demoMirrorTrackWindowRegion: Bool
     /// Virtual key code and modifier-flag raw value for the global break timer
     /// hotkey.
     var breakHotKeyCode: Int
@@ -149,6 +159,12 @@ struct AppSettings: Equatable {
         // Control+Shift+8 captures a panorama to a file.
         panoramaHotKeyCode: 28,
         panoramaHotKeyModifiers: 1 << 18,
+        // Control+9 (kVK_ANSI_9 = 25) mirrors the whole screen;
+        // Control+Shift+9 selects a region to mirror;
+        // Control+Option+9 mirrors the window under the cursor.
+        demoMirrorHotKeyCode: 25,
+        demoMirrorHotKeyModifiers: 1 << 18,
+        demoMirrorTrackWindowRegion: true,
         // Control+3 (kVK_ANSI_3 = 20) toggles the break timer.
         breakHotKeyCode: 20,
         breakHotKeyModifiers: 1 << 18,
@@ -218,6 +234,9 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let demoTypeUserDriven = "demoTypeUserDriven"
         static let panoramaHotKeyCode = "panoramaHotKeyCode"
         static let panoramaHotKeyModifiers = "panoramaHotKeyModifiers"
+        static let demoMirrorHotKeyCode = "demoMirrorHotKeyCode"
+        static let demoMirrorHotKeyModifiers = "demoMirrorHotKeyModifiers"
+        static let demoMirrorTrackWindowRegion = "demoMirrorTrackWindowRegion"
         static let breakHotKeyCode = "breakHotKeyCode"
         static let breakHotKeyModifiers = "breakHotKeyModifiers"
         static let breakDurationMinutes = "breakDurationMinutes"
@@ -412,6 +431,18 @@ final class UserDefaultsSettingsStore: SettingsStore {
             settings.panoramaHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.panoramaHotKeyModifiers))
         }
 
+        if defaults.object(forKey: Key.demoMirrorHotKeyCode) != nil {
+            settings.demoMirrorHotKeyCode = defaults.integer(forKey: Key.demoMirrorHotKeyCode)
+        }
+
+        if defaults.object(forKey: Key.demoMirrorHotKeyModifiers) != nil {
+            settings.demoMirrorHotKeyModifiers = UInt(bitPattern: defaults.integer(forKey: Key.demoMirrorHotKeyModifiers))
+        }
+
+        if defaults.object(forKey: Key.demoMirrorTrackWindowRegion) != nil {
+            settings.demoMirrorTrackWindowRegion = defaults.bool(forKey: Key.demoMirrorTrackWindowRegion)
+        }
+
         if defaults.object(forKey: Key.breakHotKeyCode) != nil {
             settings.breakHotKeyCode = defaults.integer(forKey: Key.breakHotKeyCode)
         }
@@ -544,6 +575,9 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(settings.demoTypeUserDriven, forKey: Key.demoTypeUserDriven)
         defaults.set(settings.panoramaHotKeyCode, forKey: Key.panoramaHotKeyCode)
         defaults.set(Int(bitPattern: settings.panoramaHotKeyModifiers), forKey: Key.panoramaHotKeyModifiers)
+        defaults.set(settings.demoMirrorHotKeyCode, forKey: Key.demoMirrorHotKeyCode)
+        defaults.set(Int(bitPattern: settings.demoMirrorHotKeyModifiers), forKey: Key.demoMirrorHotKeyModifiers)
+        defaults.set(settings.demoMirrorTrackWindowRegion, forKey: Key.demoMirrorTrackWindowRegion)
         defaults.set(settings.breakHotKeyCode, forKey: Key.breakHotKeyCode)
         defaults.set(Int(bitPattern: settings.breakHotKeyModifiers), forKey: Key.breakHotKeyModifiers)
         defaults.set(settings.breakDurationMinutes, forKey: Key.breakDurationMinutes)
