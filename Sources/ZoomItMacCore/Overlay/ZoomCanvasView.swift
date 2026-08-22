@@ -396,6 +396,14 @@ final class ZoomCanvasView: NSView {
             needsDisplay = true
             return
         }
+        // ⌘V pastes clipboard text into the annotation being typed, useful for
+        // text an input method makes awkward to type on the overlay. Matched by
+        // character rather than key code so it follows the keyboard layout.
+        if interactionMode == .typing, event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "v" {
+            pasteClipboardText()
+            return
+        }
         switch event.keyCode {
         case 53:
             // Esc leaves typing mode first (matching ZoomIt). In live-zoom
@@ -436,16 +444,6 @@ final class ZoomCanvasView: NSView {
         case 8 where event.modifierFlags.contains(.command):
             // ⌘C copies the whole zoomed viewport (matching ZoomIt's Ctrl+C).
             copyViewport()
-        case 9 where interactionMode == .typing && event.modifierFlags.contains(.command):
-            // ⌘V pastes clipboard text into the annotation being typed. Useful
-            // for text an input method makes awkward to type on the overlay.
-            if let clipboard = NSPasteboard.general.string(forType: .string) {
-                let text = Self.normalizedPasteText(clipboard)
-                if !text.isEmpty {
-                    annotationController.insertText(text)
-                    needsDisplay = true
-                }
-            }
         case 51 where interactionMode == .typing, 117 where interactionMode == .typing:
             annotationController.deleteBackward()
             needsDisplay = true
@@ -479,6 +477,14 @@ final class ZoomCanvasView: NSView {
             super.doCommand(by: selector)
             return
         }
+    }
+
+    private func pasteClipboardText() {
+        guard let clipboard = NSPasteboard.general.string(forType: .string) else { return }
+        let text = Self.normalizedPasteText(clipboard)
+        guard !text.isEmpty else { return }
+        annotationController.insertText(text)
+        needsDisplay = true
     }
 
     /// Normalizes clipboard text for the annotation: Windows and classic Mac
