@@ -265,6 +265,13 @@ public enum SelfTestRunner {
         controller.confirmMarkedText("日本")
         try expect(controller.annotationSnapshot[0].text == "A注한日本", "Expected kana-to-kanji conversion to replace the preedit")
 
+        // Finalizing without a separate commit (unmarkText) keeps what is on
+        // screen; only cancelling takes it away.
+        controller.setMarkedText("字")
+        controller.acceptMarkedText()
+        try expect(controller.annotationSnapshot[0].text == "A注한日本字", "Expected an accepted composition to stay in the annotation")
+        try expect(!controller.hasMarkedText, "Expected accepting to end the composition")
+
         // A composition that created the annotation must take it away again.
         let cancelled = AnnotationController()
         cancelled.setInsertionPoint(CGPoint(x: 20, y: 30))

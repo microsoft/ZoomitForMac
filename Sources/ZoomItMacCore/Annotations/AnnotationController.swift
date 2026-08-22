@@ -193,6 +193,13 @@ final class AnnotationController {
         insertText(text)
     }
 
+    /// Ends composition by accepting what is on screen, which is what an input
+    /// method asks for when it finalizes with unmarkText: the preedit is
+    /// already in the annotation, so only the tracking is dropped.
+    func acceptMarkedText() {
+        markedText = ""
+    }
+
     /// Drops the preedit without committing it, removing the text annotation
     /// again if the composition was all it contained.
     func clearMarkedText() {

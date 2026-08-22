@@ -695,8 +695,12 @@ final class ZoomCanvasView: NSView {
     /// in the annotation showing its preedit.
     private func discardComposition() {
         guard annotationController.hasMarkedText else { return }
-        inputContext?.discardMarkedText()
+        // Drop the preedit first: discardMarkedText makes the input method
+        // finalize, and its unmarkText callback accepts whatever is still
+        // marked. With the annotation already cleared there is nothing left for
+        // it to accept, so an abandoned composition never lands on screen.
         annotationController.clearMarkedText()
+        inputContext?.discardMarkedText()
     }
 
     private func finishLockedTypingAtCaret(reason: String) {
@@ -1051,9 +1055,13 @@ extension ZoomCanvasView: @MainActor NSTextInputClient {
         needsDisplay = true
     }
 
+    /// An input method finalizing a composition expects the marked text to stay
+    /// as ordinary text, so this only ends the composition. Cancelling goes
+    /// through setMarkedText("") or discardComposition() instead, which do
+    /// remove it.
     func unmarkText() {
         guard interactionMode == .typing else { return }
-        annotationController.clearMarkedText()
+        annotationController.acceptMarkedText()
         needsDisplay = true
     }
 
