@@ -1098,7 +1098,8 @@ extension ZoomCanvasView: @MainActor NSTextInputClient {
 
     /// Positions the input method's candidate window at the text caret.
     func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
-        guard let window, let caret = annotationController.typingCaret() else { return .zero }
+        guard interactionMode == .typing, let window,
+              let caret = annotationController.typingCaret() else { return .zero }
         let source = viewportController.sourceRect(for: bounds, cursorLocation: latestCursorLocation)
         let top = viewPoint(forContentPoint: caret.origin, source: source)
         let bottom = viewPoint(forContentPoint: CGPoint(x: caret.origin.x, y: caret.origin.y + caret.height), source: source)
