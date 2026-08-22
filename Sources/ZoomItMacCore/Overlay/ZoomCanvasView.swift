@@ -1079,15 +1079,21 @@ extension ZoomCanvasView: @MainActor NSTextInputClient {
         interactionMode == .typing && annotationController.hasMarkedText
     }
 
+    /// Both ranges are measured from the start of the text being typed, the way
+    /// NSTextInputClient defines them, and in UTF-16 units rather than
+    /// Characters so a composition containing a non-BMP character reports the
+    /// length the input method expects.
     func markedRange() -> NSRange {
-        // NSRange is measured in UTF-16 units, not Characters, so a composition
-        // containing a non-BMP character reports the length the IME expects.
         let length = annotationController.markedText.utf16.count
-        return length > 0 ? NSRange(location: 0, length: length) : NSRange(location: NSNotFound, length: 0)
+        guard length > 0 else { return NSRange(location: NSNotFound, length: 0) }
+        // The composition is always the tail of the text being typed.
+        let total = annotationController.typingText.utf16.count
+        return NSRange(location: max(0, total - length), length: length)
     }
 
+    /// Typing always appends, so the caret sits at the end of the text.
     func selectedRange() -> NSRange {
-        NSRange(location: annotationController.markedText.utf16.count, length: 0)
+        NSRange(location: annotationController.typingText.utf16.count, length: 0)
     }
 
     /// Positions the input method's candidate window at the text caret.

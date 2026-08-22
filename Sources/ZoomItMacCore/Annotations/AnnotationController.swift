@@ -178,6 +178,15 @@ final class AnnotationController {
     /// Whether an input method is currently composing text.
     var hasMarkedText: Bool { !markedText.isEmpty }
 
+    /// The text of the annotation being typed, including any composition in
+    /// progress. This is the whole document as far as an input method is
+    /// concerned, and `markedText` is always its suffix.
+    var typingText: String {
+        guard let textAnnotationIndex, annotations.indices.contains(textAnnotationIndex),
+              annotations[textAnnotationIndex].tool == .text else { return "" }
+        return annotations[textAnnotationIndex].text
+    }
+
     /// Replaces the in-progress composition with `text` (the IME's preedit).
     func setMarkedText(_ text: String) {
         clearMarkedText()

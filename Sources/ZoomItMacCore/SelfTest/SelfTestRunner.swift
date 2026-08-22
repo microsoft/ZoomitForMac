@@ -249,6 +249,11 @@ public enum SelfTestRunner {
         controller.setMarkedText("ㄓㄨˋ")
         try expect(controller.annotationSnapshot[0].text == "Aㄓㄨˋ", "Expected an updated preedit to replace the previous one")
         try expect(controller.hasMarkedText, "Expected composition to be in progress")
+        // The ranges NSTextInputClient reports are derived from the preedit
+        // being the tail of the text being typed.
+        try expect(controller.typingText == "Aㄓㄨˋ", "Expected typingText to include the preedit")
+        try expect(controller.typingText.hasSuffix(controller.markedText),
+                   "Expected the preedit to be the suffix of the text being typed")
 
         controller.confirmMarkedText("注")
         try expect(controller.annotationSnapshot[0].text == "A注", "Expected the committed character to replace the preedit")
