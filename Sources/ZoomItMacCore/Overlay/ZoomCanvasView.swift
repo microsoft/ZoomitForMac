@@ -1095,8 +1095,11 @@ extension ZoomCanvasView: @MainActor NSTextInputClient {
         []
     }
 
+    /// The canvas has no hit-testable text layout, so no point maps to a
+    /// character index. NSNotFound is the documented answer for that; returning
+    /// 0 would tell the input method every point is the start of the text.
     func characterIndex(for point: NSPoint) -> Int {
-        0
+        NSNotFound
     }
 
     /// Input methods hand text over as either a plain or an attributed string;
