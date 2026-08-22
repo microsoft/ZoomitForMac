@@ -40,6 +40,7 @@ public enum SelfTestRunner {
         try testTypingAnnotations()
         try testMarkedTextComposition()
         try testPastedTextLineEndings()
+        try testShortcutKeysDoNotTypeText()
         try testAnnotationRenderingTouchesPixels()
         try testSettingsRoundTrip()
         try testFirstLaunchFlag()
@@ -288,6 +289,17 @@ public enum SelfTestRunner {
                    "Expected CRLF and CR line endings to normalize to LF")
         try expect(ZoomCanvasView.normalizedPasteText("中文") == "中文",
                    "Expected text without line breaks to paste unchanged")
+    }
+
+    /// Keys held with Command or Control are shortcuts, so an unhandled one
+    /// must not be typed into the annotation.
+    private static func testShortcutKeysDoNotTypeText() throws {
+        try expect(ZoomCanvasView.typesAsText(modifiers: []), "Expected a plain key to type")
+        try expect(ZoomCanvasView.typesAsText(modifiers: [.shift]), "Expected Shift to type")
+        try expect(ZoomCanvasView.typesAsText(modifiers: [.option]),
+                   "Expected Option to type, since it produces real characters")
+        try expect(!ZoomCanvasView.typesAsText(modifiers: [.command]), "Expected Command to be a shortcut")
+        try expect(!ZoomCanvasView.typesAsText(modifiers: [.control]), "Expected Control to be a shortcut")
     }
 
     private static func testAnnotationRenderingTouchesPixels() throws {

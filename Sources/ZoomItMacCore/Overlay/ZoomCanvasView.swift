@@ -459,6 +459,7 @@ final class ZoomCanvasView: NSView {
                 // plain keys come straight back through NSTextInputClient's
                 // insertText, composing ones via setMarkedText.
                 if inputContext?.handleEvent(event) != true,
+                   Self.typesAsText(modifiers: event.modifierFlags),
                    let characters = event.characters, !characters.isEmpty {
                     annotationController.insertText(characters)
                 }
@@ -477,6 +478,15 @@ final class ZoomCanvasView: NSView {
             super.doCommand(by: selector)
             return
         }
+    }
+
+    /// Whether an unhandled key event should be typed into the annotation.
+    /// Command and Control mean the key is a shortcut, so an unrecognized one
+    /// like ⌘A does nothing instead of typing "a", and Control combinations do
+    /// not put their control character on screen. Option is left alone because
+    /// it produces real characters.
+    static func typesAsText(modifiers: NSEvent.ModifierFlags) -> Bool {
+        !modifiers.contains(.command) && !modifiers.contains(.control)
     }
 
     private func pasteClipboardText() {
@@ -1066,7 +1076,7 @@ extension ZoomCanvasView: @MainActor NSTextInputClient {
     }
 
     func hasMarkedText() -> Bool {
-        annotationController.hasMarkedText
+        interactionMode == .typing && annotationController.hasMarkedText
     }
 
     func markedRange() -> NSRange {
