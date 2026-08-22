@@ -1093,7 +1093,8 @@ extension ZoomCanvasView: @MainActor NSTextInputClient {
         0
     }
 
-    /// Commands an input method emits (move-left, cancel, …) have no meaning on
+    /// Input methods hand text over as either a plain or an attributed string;
+    /// the annotation only carries characters, so the styling is dropped.
     private static func plainString(_ string: Any) -> String {
         (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
     }
