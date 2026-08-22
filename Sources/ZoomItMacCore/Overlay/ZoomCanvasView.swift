@@ -471,6 +471,16 @@ final class ZoomCanvasView: NSView {
         }
     }
 
+    /// Commands an input method emits (move-left, cancel, …) have no meaning on
+    /// an annotation canvas; swallowing them in typing mode avoids the beep.
+    /// Other modes keep the standard responder behaviour.
+    override func doCommand(by selector: Selector) {
+        guard interactionMode == .typing else {
+            super.doCommand(by: selector)
+            return
+        }
+    }
+
     /// Normalizes clipboard text for the annotation: Windows and classic Mac
     /// line endings become "\n" so the caret math in
     /// `AnnotationController.typingCaret()`, which counts "\n", agrees with what
@@ -1036,6 +1046,7 @@ extension ZoomCanvasView: @MainActor NSTextInputClient {
     }
 
     func unmarkText() {
+        guard interactionMode == .typing else { return }
         annotationController.clearMarkedText()
         needsDisplay = true
     }
@@ -1083,14 +1094,6 @@ extension ZoomCanvasView: @MainActor NSTextInputClient {
     }
 
     /// Commands an input method emits (move-left, cancel, …) have no meaning on
-    /// an annotation canvas; swallowing them in typing mode avoids the beep.
-    override func doCommand(by selector: Selector) {
-        guard interactionMode == .typing else {
-            super.doCommand(by: selector)
-            return
-        }
-    }
-
     private static func plainString(_ string: Any) -> String {
         (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
     }
