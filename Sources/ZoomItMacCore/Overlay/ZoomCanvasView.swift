@@ -50,6 +50,7 @@ final class ZoomCanvasView: NSView {
         didSet {
             let leftTypingMode = oldValue == .typing && interactionMode != .typing
             if leftTypingMode {
+                discardComposition()
                 anchorCursorAfterTyping()
             }
             switch interactionMode {
@@ -227,6 +228,7 @@ final class ZoomCanvasView: NSView {
         }
 
         if interactionMode == .typing {
+            discardComposition()
             if annotationController.isTypingLocked {
                 finishLockedTypingAtCaret(reason: "mouse down locked")
                 needsDisplay = true
@@ -293,6 +295,7 @@ final class ZoomCanvasView: NSView {
     override func rightMouseDown(with event: NSEvent) {
         pointerViewPoint = convert(event.locationInWindow, from: nil)
         if interactionMode == .typing {
+            discardComposition()
             if annotationController.isTypingLocked {
                 finishLockedTypingAtCaret(reason: "right mouse locked")
             } else {
@@ -384,6 +387,15 @@ final class ZoomCanvasView: NSView {
             }
             return
         }
+        // While an input method is composing (a Chinese IME's phonetic preedit,
+        // for example) every key belongs to the IME — including Esc, Return,
+        // Backspace and the arrows, which select candidates, page through them
+        // or cancel the composition rather than acting on the annotation.
+        if interactionMode == .typing && annotationController.hasMarkedText {
+            inputContext?.handleEvent(event)
+            needsDisplay = true
+            return
+        }
         switch event.keyCode {
         case 53:
             // Esc leaves typing mode first (matching ZoomIt). In live-zoom
@@ -434,8 +446,14 @@ final class ZoomCanvasView: NSView {
             annotationController.insertText("\n")
             needsDisplay = true
         default:
-            if interactionMode == .typing, let characters = event.characters, !characters.isEmpty {
-                annotationController.insertText(characters)
+            if interactionMode == .typing {
+                // Route through the input context so input methods can compose;
+                // plain keys come straight back through NSTextInputClient's
+                // insertText, composing ones via setMarkedText.
+                if inputContext?.handleEvent(event) != true,
+                   let characters = event.characters, !characters.isEmpty {
+                    annotationController.insertText(characters)
+                }
                 needsDisplay = true
             } else {
                 handleDrawingShortcut(event) ?? interpretKeyEvents([event])
@@ -636,6 +654,14 @@ final class ZoomCanvasView: NSView {
         }
         syncPointerViewPointFromMouse()
         latestCursorLocation = NSEvent.mouseLocation
+    }
+
+    /// Abandons any in-progress input method composition, both in the IME and
+    /// in the annotation showing its preedit.
+    private func discardComposition() {
+        guard annotationController.hasMarkedText else { return }
+        inputContext?.discardMarkedText()
+        annotationController.clearMarkedText()
     }
 
     private func finishLockedTypingAtCaret(reason: String) {
@@ -967,5 +993,86 @@ final class ZoomCanvasView: NSView {
         context.setFillColor(annotationController.currentStyle.color.nsColor.cgColor)
         context.fillEllipse(in: rect)
         context.restoreGState()
+    }
+}
+/// Text input plumbing so input methods that compose (Chinese, Japanese,
+/// Korean, dead keys) work in typing mode. Without it the raw keystrokes —
+/// bopomofo symbols, for instance — would be painted on screen instead of the
+/// characters the IME produces.
+///
+/// Every callback is ignored outside typing mode: `interpretKeyEvents` is still
+/// used as the fallback for unhandled keys in zoom/draw modes, and conforming to
+/// this protocol makes it route those keys here.
+extension ZoomCanvasView: @MainActor NSTextInputClient {
+    func insertText(_ string: Any, replacementRange: NSRange) {
+        guard interactionMode == .typing else { return }
+        annotationController.confirmMarkedText(Self.plainString(string))
+        needsDisplay = true
+    }
+
+    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        guard interactionMode == .typing else { return }
+        annotationController.setMarkedText(Self.plainString(string))
+        needsDisplay = true
+    }
+
+    func unmarkText() {
+        annotationController.clearMarkedText()
+        needsDisplay = true
+    }
+
+    func hasMarkedText() -> Bool {
+        annotationController.hasMarkedText
+    }
+
+    func markedRange() -> NSRange {
+        // NSRange is measured in UTF-16 units, not Characters, so a composition
+        // containing a non-BMP character reports the length the IME expects.
+        let length = annotationController.markedText.utf16.count
+        return length > 0 ? NSRange(location: 0, length: length) : NSRange(location: NSNotFound, length: 0)
+    }
+
+    func selectedRange() -> NSRange {
+        NSRange(location: annotationController.markedText.utf16.count, length: 0)
+    }
+
+    /// Positions the input method's candidate window at the text caret.
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        guard let window, let caret = annotationController.typingCaret() else { return .zero }
+        let source = viewportController.sourceRect(for: bounds, cursorLocation: latestCursorLocation)
+        let top = viewPoint(forContentPoint: caret.origin, source: source)
+        let bottom = viewPoint(forContentPoint: CGPoint(x: caret.origin.x, y: caret.origin.y + caret.height), source: source)
+        let rect = NSRect(
+            x: top.x,
+            y: min(top.y, bottom.y),
+            width: 1,
+            height: max(1, abs(bottom.y - top.y))
+        )
+        return window.convertToScreen(convert(rect, to: nil))
+    }
+
+    func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+        nil
+    }
+
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] {
+        []
+    }
+
+    func characterIndex(for point: NSPoint) -> Int {
+        0
+    }
+
+    /// Commands an input method emits (move-left, cancel, …) have no meaning on
+    /// an annotation canvas; swallowing them in typing mode avoids the beep.
+    override func doCommand(by selector: Selector) {
+        guard interactionMode == .typing else {
+            super.doCommand(by: selector)
+            return
+        }
+    }
+
+    private static func plainString(_ string: Any) -> String {
+        (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
     }
 }
