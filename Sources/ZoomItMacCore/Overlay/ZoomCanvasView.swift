@@ -436,6 +436,16 @@ final class ZoomCanvasView: NSView {
         case 8 where event.modifierFlags.contains(.command):
             // ⌘C copies the whole zoomed viewport (matching ZoomIt's Ctrl+C).
             copyViewport()
+        case 9 where interactionMode == .typing && event.modifierFlags.contains(.command):
+            // ⌘V pastes clipboard text into the annotation being typed. Useful
+            // for text an input method makes awkward to type on the overlay.
+            if let clipboard = NSPasteboard.general.string(forType: .string) {
+                let text = Self.normalizedPasteText(clipboard)
+                if !text.isEmpty {
+                    annotationController.insertText(text)
+                    needsDisplay = true
+                }
+            }
         case 51 where interactionMode == .typing, 117 where interactionMode == .typing:
             annotationController.deleteBackward()
             needsDisplay = true
@@ -459,6 +469,15 @@ final class ZoomCanvasView: NSView {
                 handleDrawingShortcut(event) ?? interpretKeyEvents([event])
             }
         }
+    }
+
+    /// Normalizes clipboard text for the annotation: Windows and classic Mac
+    /// line endings become "\n" so the caret math in
+    /// `AnnotationController.typingCaret()`, which counts "\n", agrees with what
+    /// the text actually draws.
+    static func normalizedPasteText(_ text: String) -> String {
+        text.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
     }
 
     private func handleDrawingShortcut(_ event: NSEvent) -> Void? {

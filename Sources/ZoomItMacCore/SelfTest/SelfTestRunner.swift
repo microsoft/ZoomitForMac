@@ -39,6 +39,7 @@ public enum SelfTestRunner {
         try testUndoAndClear()
         try testTypingAnnotations()
         try testMarkedTextComposition()
+        try testPastedTextLineEndings()
         try testAnnotationRenderingTouchesPixels()
         try testSettingsRoundTrip()
         try testFirstLaunchFlag()
@@ -271,6 +272,15 @@ public enum SelfTestRunner {
         try expect(cancelled.annotationSnapshot.count == 1, "Expected the preedit to create a text annotation")
         cancelled.clearMarkedText()
         try expect(cancelled.annotationSnapshot.isEmpty, "Expected a cancelled composition to remove the empty text annotation")
+    }
+
+    /// Pasted text keeps a single line-ending convention so the typing caret,
+    /// which counts "\n", lands where the text is actually drawn.
+    private static func testPastedTextLineEndings() throws {
+        try expect(ZoomCanvasView.normalizedPasteText("一\r\n二\r三") == "一\n二\n三",
+                   "Expected CRLF and CR line endings to normalize to LF")
+        try expect(ZoomCanvasView.normalizedPasteText("中文") == "中文",
+                   "Expected text without line breaks to paste unchanged")
     }
 
     private static func testAnnotationRenderingTouchesPixels() throws {
