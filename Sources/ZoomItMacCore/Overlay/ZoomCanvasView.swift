@@ -1098,6 +1098,7 @@ extension ZoomCanvasView: @MainActor NSTextInputClient {
     /// Characters so a composition containing a non-BMP character reports the
     /// length the input method expects.
     func markedRange() -> NSRange {
+        guard interactionMode == .typing else { return NSRange(location: NSNotFound, length: 0) }
         let length = annotationController.markedText.utf16.count
         guard length > 0 else { return NSRange(location: NSNotFound, length: 0) }
         // The composition is always the tail of the text being typed.
@@ -1105,15 +1106,24 @@ extension ZoomCanvasView: @MainActor NSTextInputClient {
         return NSRange(location: max(0, total - length), length: length)
     }
 
-    /// Typing always appends, so the caret sits at the end of the text.
+    /// Typing always appends, so the caret sits at the end of the text. Leaving
+    /// typing mode does not clear the annotation being typed, so without the
+    /// guard this would keep advertising an editable selection to the text
+    /// input system in zoom and draw modes.
     func selectedRange() -> NSRange {
-        NSRange(location: annotationController.typingText.utf16.count, length: 0)
+        guard interactionMode == .typing else { return NSRange(location: NSNotFound, length: 0) }
+        return NSRange(location: annotationController.typingText.utf16.count, length: 0)
     }
 
     /// Positions the input method's candidate window at the text caret.
     func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
         guard interactionMode == .typing, let window,
-              let caret = annotationController.typingCaret() else { return .zero }
+              let caret = annotationController.typingCaret() else {
+            actualRange?.pointee = NSRange(location: NSNotFound, length: 0)
+            return .zero
+        }
+        // The rectangle covers the caret, which sits at the end of the text.
+        actualRange?.pointee = NSRange(location: annotationController.typingText.utf16.count, length: 0)
         let source = viewportController.sourceRect(for: bounds, cursorLocation: latestCursorLocation)
         let top = viewPoint(forContentPoint: caret.origin, source: source)
         let bottom = viewPoint(forContentPoint: CGPoint(x: caret.origin.x, y: caret.origin.y + caret.height), source: source)
