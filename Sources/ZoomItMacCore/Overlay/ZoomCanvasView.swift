@@ -1053,12 +1053,26 @@ final class ZoomCanvasView: NSView {
 /// used as the fallback for unhandled keys in zoom/draw modes, and conforming to
 /// this protocol makes it route those keys here.
 extension ZoomCanvasView: @MainActor NSTextInputClient {
+    /// `replacementRange` is deliberately ignored, here and in `setMarkedText`.
+    /// Typing appends, so the composition is always the tail of the text and a
+    /// concrete range naming that composition produces the same result as
+    /// replacing the tail. A range naming already committed text would not, but
+    /// reaching one means reconverting, and this view advertises no addressable
+    /// document to reconvert from: `attributedSubstring` returns nil and
+    /// `characterIndex(for:)` returns NSNotFound. Honouring arbitrary ranges
+    /// would put the preedit in the middle of the text, which needs a real
+    /// insertion point and selection model rather than an annotation that grows
+    /// at the end.
     func insertText(_ string: Any, replacementRange: NSRange) {
         guard interactionMode == .typing else { return }
         annotationController.confirmMarkedText(Self.plainString(string))
         needsDisplay = true
     }
 
+    /// The input method's selection within the composition is not tracked
+    /// either: `selectedRange()` reports the caret at the end of the text.
+    /// Showing an active clause would mean styling the preedit, which the
+    /// annotation render path does not do.
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
         guard interactionMode == .typing else { return }
         annotationController.setMarkedText(Self.plainString(string))
