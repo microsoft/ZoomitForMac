@@ -67,6 +67,7 @@ public enum SelfTestRunner {
         try testStandardIconIsRoundedSquareWithMargin()
         try testDefaultTypingFontIsSystem20pt()
         try testStaticZoomStaysAtOneX()
+        try testZoomSaveShortcut()
         try testPanoramaStitching()
         try testPanoramaTopSeamUsesSingleFramePixels()
         try testPanoramaVerticalSeamKeepsSingleFrame()
@@ -427,13 +428,34 @@ public enum SelfTestRunner {
     private static func testStaticZoomStaysAtOneX() throws {
         // Windows ZoomIt keeps static zoom active when the user zooms all the
         // way out to 1x; only Esc/right-click exits. Live zoom still exits at
-        // the floor.
+        // the floor. Typing is a sub-mode of the zoom mode it was entered from
+        // (T works in both zoom and draw modes), so it inherits that mode's
+        // behavior at the floor.
         try expect(ModeCoordinator.exitsOnZoomOutFloor(mode: .staticZoom) == false,
                    "Expected static zoom to stay active at 1x instead of exiting")
         try expect(ModeCoordinator.exitsOnZoomOutFloor(mode: .liveZoom),
                    "Expected live zoom to exit when zoomed out to 1x")
-        try expect(ModeCoordinator.exitsOnZoomOutFloor(mode: .typing),
+        try expect(ModeCoordinator.exitsOnZoomOutFloor(mode: .typing, modeBeforeTyping: .liveZoom),
                    "Expected typing (live zoom sub-mode) to exit when zoomed out to 1x")
+        try expect(ModeCoordinator.exitsOnZoomOutFloor(mode: .typing, modeBeforeTyping: .staticZoom) == false,
+                   "Expected typing entered from static zoom to stay active at 1x like static zoom")
+        try expect(ModeCoordinator.exitsOnZoomOutFloor(mode: .typing),
+                   "Expected typing to default to the live zoom behavior at the zoom-out floor")
+    }
+
+    private static func testZoomSaveShortcut() throws {
+        try expect(
+            ZoomCanvasView.isSaveShortcut(keyCode: 1, modifierFlags: [.command]),
+            "Expected Command-S to save the zoomed viewport"
+        )
+        try expect(
+            ZoomCanvasView.isSaveShortcut(keyCode: 1, modifierFlags: []) == false,
+            "Expected an unmodified S key not to save the zoomed viewport"
+        )
+        try expect(
+            ZoomCanvasView.isSaveShortcut(keyCode: 1, modifierFlags: [.control]) == false,
+            "Expected Control-S not to be treated as the macOS save shortcut"
+        )
     }
 
     /// The break timer view uses a flipped coordinate system. Drawing a

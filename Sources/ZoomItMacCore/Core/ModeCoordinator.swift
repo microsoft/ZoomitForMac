@@ -159,9 +159,13 @@ final class ModeCoordinator {
         case .decreasePenWidth:
             annotationController.currentStyle.rootWidth = max(1, annotationController.currentStyle.rootWidth - 1)
         case .toggleTyping(let rightAligned):
+            // Typing is only available on top of a zoom or draw overlay; the
+            // canvas normally gates the T key, but ignore stray toggles from
+            // other modes so typing never lands in an inconsistent state.
             if mode == .typing {
                 mode = modeBeforeTyping
             } else {
+                guard mode == .staticZoom || mode == .liveZoom || mode == .drawOnly else { return }
                 modeBeforeTyping = mode
                 mode = .typing
                 annotationController.beginTypingSession(rightAligned: rightAligned)
@@ -351,9 +355,13 @@ final class ModeCoordinator {
 
     /// At the zoom-out floor (1x), decides whether the overlay should exit.
     /// Matches Windows ZoomIt: static zoom stays active at 1x, while live zoom
-    /// (and its typing sub-mode) still exits when zoomed all the way out.
-    static func exitsOnZoomOutFloor(mode: AppMode) -> Bool {
-        mode != .staticZoom
+    /// still exits when zoomed all the way out. Typing is a sub-mode of the
+    /// zoom/draw mode it was entered from, so it inherits that mode's behavior.
+    static func exitsOnZoomOutFloor(mode: AppMode, modeBeforeTyping: AppMode = .liveZoom) -> Bool {
+        if mode == .typing {
+            return modeBeforeTyping != .staticZoom
+        }
+        return mode != .staticZoom
     }
 
     private func zoomIn() {
@@ -375,8 +383,9 @@ final class ModeCoordinator {
         guard current > settings.minimumZoomFactor else {
             // Static zoom matches Windows ZoomIt: it stays active at 1x instead
             // of exiting when the user zooms all the way out. Only Esc (or right
-            // click) exits static zoom. Live zoom still exits at 1x.
-            if Self.exitsOnZoomOutFloor(mode: mode) {
+            // click) exits static zoom. Live zoom still exits at 1x. Typing
+            // inherits the behavior of the mode it was entered from.
+            if Self.exitsOnZoomOutFloor(mode: mode, modeBeforeTyping: modeBeforeTyping) {
                 animateExit()
             }
             return
