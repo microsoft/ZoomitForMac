@@ -54,6 +54,7 @@ public enum SelfTestRunner {
         try testPanoramaEscapeCancel()
         try testIdleSleepAssertionLifecycle()
         try testStatusMenuOrderMatchesWindows()
+        try testStatusMenuActionsAreWired()
         try testClipTransitionUpdatesOnChange()
         try testWebcamOverlayDragOrigin()
         try testTrimSavePreservesOriginal()
@@ -576,6 +577,7 @@ public enum SelfTestRunner {
             "Record Screen",    // Record
             "Panorama Capture", // macOS-only, after Record
             "Break Timer",      // moved below Panorama Capture
+            "Keyboard Shortcuts",
             "Check Permissions",
             "Quit"
         ]
@@ -600,6 +602,20 @@ public enum SelfTestRunner {
         // Options must be first and Quit last, as on Windows.
         try expect(titles.first == "Settings…", "Expected Options/Settings to be the first menu item")
         try expect(titles.last == "Quit", "Expected Quit to be the last menu item")
+    }
+
+    /// Every non-separator status-menu entry must have a non-nil action that
+    /// AppController actually responds to; otherwise the menu item would be
+    /// permanently disabled at runtime. Regression guard for wiring up new
+    /// entries such as "Keyboard Shortcuts".
+    private static func testStatusMenuActionsAreWired() throws {
+        for entry in AppDelegate.statusMenuEntries() where !entry.isSeparator {
+            guard let action = entry.action else {
+                throw SelfTestError.failure("Expected menu entry '\(entry.title)' to have an action")
+            }
+            try expect(AppController.instancesRespond(to: action),
+                       "Expected AppController to respond to \(action) for menu entry '\(entry.title)'")
+        }
     }
 
     /// Changing the clip transition popup from Fade to Black to Fade to White
