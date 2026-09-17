@@ -280,6 +280,7 @@ public enum SelfTestRunner {
         settings.animateZoom = false
         settings.smoothImage = false
         settings.rootPenWidth = 12
+        settings.lastPenColor = .green
         settings.typingFontName = "Helvetica"
         settings.typingFontSize = 48
         settings.hotKeyCode = 19

@@ -150,6 +150,7 @@ final class ModeCoordinator {
         case .setColor(let color):
             annotationController.currentStyle.color = color
             annotationController.currentStyle.alpha = 1
+            persistLastPenColor(color)
         case .setHighlightColor(let color):
             // Shift+color: translucent highlighter of that color.
             annotationController.currentStyle.color = color
@@ -185,6 +186,20 @@ final class ModeCoordinator {
         settingsStore.save(settings)
     }
 
+    private func persistLastPenColor(_ color: AnnotationColor) {
+        var settings = settingsStore.load()
+        settings.lastPenColor = color
+        settingsStore.save(settings)
+    }
+
+    private func applyPersistedDrawingDefaults(_ settings: AppSettings) {
+        annotationController.currentStyle.rootWidth = settings.rootPenWidth
+        annotationController.currentStyle.color = settings.lastPenColor
+        annotationController.currentStyle.alpha = 1
+        annotationController.typingFontName = settings.typingFontName
+        annotationController.typingFontSize = settings.typingFontSize
+    }
+
     private func activateStaticZoom() {
         guard mode == .idle else {
             animateExit()
@@ -206,10 +221,7 @@ final class ModeCoordinator {
                 let settings = settingsStore.load()
                 viewportController.configure(for: frame, initialZoom: settings.defaultZoomFactor)
                 annotationController.reset()
-                // Apply persisted drawing/typing defaults from the settings dialog.
-                annotationController.currentStyle.rootWidth = settings.rootPenWidth
-                annotationController.typingFontName = settings.typingFontName
-                annotationController.typingFontSize = settings.typingFontSize
+                applyPersistedDrawingDefaults(settings)
                 if settings.animateZoom {
                     // Start fully zoomed out so the overlay telescopes in to the
                     // target zoom, matching Windows ZoomIt.
@@ -255,9 +267,7 @@ final class ModeCoordinator {
                 let settings = settingsStore.load()
                 viewportController.configure(for: frame, initialZoom: settings.defaultZoomFactor)
                 annotationController.reset()
-                annotationController.currentStyle.rootWidth = settings.rootPenWidth
-                annotationController.typingFontName = settings.typingFontName
-                annotationController.typingFontSize = settings.typingFontSize
+                applyPersistedDrawingDefaults(settings)
                 if settings.animateZoom {
                     viewportController.beginZoomInAnimation()
                 }
@@ -330,9 +340,7 @@ final class ModeCoordinator {
                 // into drawing mode; there is no magnification or animation.
                 viewportController.configure(for: frame, initialZoom: 1)
                 annotationController.reset()
-                annotationController.currentStyle.rootWidth = settings.rootPenWidth
-                annotationController.typingFontName = settings.typingFontName
-                annotationController.typingFontSize = settings.typingFontSize
+                applyPersistedDrawingDefaults(settings)
                 overlayController.show(
                     frame: frame,
                     viewportController: viewportController,
