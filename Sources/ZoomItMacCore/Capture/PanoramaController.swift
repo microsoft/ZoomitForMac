@@ -64,7 +64,10 @@ final class PanoramaController {
     /// True from the moment a panorama is initiated (region selection) until it
     /// finishes, so a second trigger can't stack a new selection.
     private var isActive = false
+    private var activationIsCurrent: (() -> Bool)?
+    private var onRegionSelectionFinished: (() -> Void)?
     private var onStateChange: ((Bool) -> Void)?
+    private var onFinished: (() -> Void)?
     /// Called right before the Save dialog is shown so any obscuring overlay can
     /// be dismissed first.
     var onWillShowSaveDialog: (() -> Void)?
@@ -77,6 +80,9 @@ final class PanoramaController {
     private var stitchTask: Task<PanoramaStitcher.Frame?, Never>?
     private var stitchCancelled = false
     private var captureDisplay: DisplayDescriptor?
+    private var selectionWindow: NSWindow?
+    private var selectionCursorLease: CrosshairCursorLease?
+    private var selectionCompletion: ((CGRect?) -> Void)?
 
     /// Upper bound on captured frames to keep stitching tractable.
     private let maxFrames = 400
@@ -96,38 +102,55 @@ final class PanoramaController {
         self.userSelectedResourceAccess = userSelectedResourceAccess
     }
 
-    /// Toggles panorama capture. The first call selects a region and begins
-    /// capturing; a second call stops and produces the panorama. `save` chooses
-    /// between saving to a file and copying to the clipboard.
-    func toggle(save: Bool, onStateChange: @escaping (Bool) -> Void) {
-        if isCapturing {
-            stopRequested = true
-            return
-        }
-        if isActive {
-            // A region selection is already on screen; ignore re-triggers.
+    /// Begins panorama capture. The coordinator owns activation until
+    /// `onFinished` runs, preventing another modal overlay from being stacked
+    /// while selection, capture, or stitching is active.
+    func begin(
+        save: Bool,
+        activationIsCurrent: @escaping () -> Bool,
+        onRegionSelectionFinished: @escaping () -> Void,
+        onStateChange: @escaping (Bool) -> Void,
+        onFinished: @escaping () -> Void
+    ) {
+        guard !isActive else {
+            onRegionSelectionFinished()
+            onFinished()
             return
         }
         isActive = true
+        self.activationIsCurrent = activationIsCurrent
+        self.onRegionSelectionFinished = onRegionSelectionFinished
         self.onStateChange = onStateChange
+        self.onFinished = onFinished
         start(save: save)
+    }
+
+    func requestStop() {
+        if isCapturing {
+            stopRequested = true
+        } else if selectionCompletion != nil {
+            finishPresentedRegionSelector(nil)
+        } else if onRegionSelectionFinished != nil {
+            finishActivation()
+        }
     }
 
     private func start(save: Bool) {
         guard ScreenRecordingPrompt.ensureGranted(permissionService) else {
-            isActive = false
+            finishActivation()
             return
         }
         guard let display = displayManager.activeDisplay() else {
             NSSound.beep()
-            isActive = false
+            finishActivation()
             return
         }
 
         selectRegion(on: display) { [weak self] rect in
             guard let self else { return }
-            guard let rect else {
-                self.isActive = false
+            self.finishRegionSelection()
+            guard let rect, self.activationIsCurrent?() == true else {
+                self.finishActivation()
                 return
             }
             self.beginCapture(display: display, region: rect, save: save)
@@ -140,6 +163,10 @@ final class PanoramaController {
         Task { @MainActor in
             guard let image = await self.captureRegion(display: display, region: nil) else {
                 NSSound.beep()
+                completion(nil)
+                return
+            }
+            guard self.activationIsCurrent?() == true else {
                 completion(nil)
                 return
             }
@@ -166,22 +193,29 @@ final class PanoramaController {
                 image: frame.image,
                 borderColor: .systemBlue
             )
-            var holder: NSWindow? = window
-            var cursorLease: CrosshairCursorLease?
-            view.onComplete = { rect in
-                holder?.orderOut(nil)
-                holder = nil
-                cursorLease?.invalidate()
-                cursorLease = nil
-                completion(rect)
+            view.onComplete = { [weak self] rect in
+                self?.finishPresentedRegionSelector(rect)
             }
             window.contentView = view
+            let cursorLease = CrosshairCursorLease(window: window)
+            self.selectionWindow = window
+            self.selectionCursorLease = cursorLease
+            self.selectionCompletion = completion
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             window.makeFirstResponder(view)
-            cursorLease = CrosshairCursorLease(window: window)
-            cursorLease?.activate()
+            cursorLease.activate()
         }
+    }
+
+    private func finishPresentedRegionSelector(_ rect: CGRect?) {
+        guard let completion = selectionCompletion else { return }
+        selectionCompletion = nil
+        selectionCursorLease?.invalidate()
+        selectionCursorLease = nil
+        selectionWindow?.orderOut(nil)
+        selectionWindow = nil
+        completion(rect)
     }
 
     // MARK: - Capture loop
@@ -200,8 +234,8 @@ final class PanoramaController {
             // error, so a stuck panorama can never wedge the hotkey.
             defer {
                 isCapturing = false
-                isActive = false
                 hideOverlays()
+                finishActivation()
             }
 
             guard let (filter, configuration) = await makeRegionCapture(display: display, region: region) else {
@@ -586,6 +620,28 @@ final class PanoramaController {
         progressIndicator = nil
         stitchTask?.cancel()
         stitchTask = nil
+    }
+
+    private func finishActivation() {
+        guard isActive else { return }
+        isActive = false
+        activationIsCurrent = nil
+        selectionCompletion = nil
+        selectionCursorLease?.invalidate()
+        selectionCursorLease = nil
+        selectionWindow?.orderOut(nil)
+        selectionWindow = nil
+        finishRegionSelection()
+        onStateChange = nil
+        let completion = onFinished
+        onFinished = nil
+        completion?()
+    }
+
+    private func finishRegionSelection() {
+        let completion = onRegionSelectionFinished
+        onRegionSelectionFinished = nil
+        completion?()
     }
 
     /// Requests cancellation of an in-progress scrolling capture (Escape).

@@ -35,6 +35,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
     private static let contentWidth: CGFloat = 540
     private static let panelHorizontalInset: CGFloat = 28
     private static let wrappedLabelWidth: CGFloat = contentWidth - panelHorizontalInset * 2
+    static let drawingLinearRouteOptionsForTesting =
+        AnnotationLinearRoute.userSelectableRoutes.map(\.displayName)
 
     private var window: NSWindow?
     /// The pane content switcher. Its own tab strip is hidden; selection is
@@ -53,6 +55,31 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
 
     // General tab controls.
     private weak var launchAtLoginCheckbox: NSButton?
+
+    // Draw tab controls.
+    private weak var rememberLastDrawingStyleCheckbox: NSButton?
+    private weak var resetDrawingUIPositionButton: NSButton?
+    private weak var defaultDrawingToolPopup: NSPopUpButton?
+    private weak var defaultDrawingStrokeColorWell: NSColorWell?
+    private weak var defaultDrawingFillColorWell: NSColorWell?
+    private weak var defaultDrawingFillStylePopup: NSPopUpButton?
+    private weak var rootPenWidthStepper: NSStepper?
+    private weak var rootPenWidthLabel: NSTextField?
+    private weak var highlighterWidthStepper: NSStepper?
+    private weak var highlighterWidthLabel: NSTextField?
+    private weak var defaultDrawingStrokePatternPopup: NSPopUpButton?
+    private weak var defaultDrawingSloppinessPopup: NSPopUpButton?
+    private weak var defaultDrawingOpacitySlider: NSSlider?
+    private weak var defaultDrawingOpacityLabel: NSTextField?
+    private weak var defaultDrawingRoundnessPopup: NSPopUpButton?
+    private weak var defaultDrawingPressurePopup: NSPopUpButton?
+    private weak var defaultDrawingSmoothingCheckbox: NSButton?
+    private weak var defaultDrawingSmartDrawCheckbox: NSButton?
+    private weak var defaultDrawingLineRoutePopup: NSPopUpButton?
+    private weak var defaultDrawingArrowRoutePopup: NSPopUpButton?
+    private weak var defaultDrawingStartArrowheadPopup: NSPopUpButton?
+    private weak var defaultDrawingEndArrowheadPopup: NSPopUpButton?
+    private weak var defaultDrawingArrowheadSizePopup: NSPopUpButton?
 
     // Record tab controls.
     private weak var microphonePopup: NSPopUpButton?
@@ -156,6 +183,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
         panoramaHotKeyButton?.title = panoramaHotKeyDisplayString()
         demoMirrorHotKeyButton?.title = demoMirrorHotKeyDisplayString()
         launchAtLoginCheckbox?.state = settings.launchAtLogin ? .on : .off
+        refreshDrawControls()
         NSApp.activate(ignoringOtherApps: true)
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -1035,39 +1063,286 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
 
     // MARK: - Draw tab
 
+    private static let defaultDrawingTools: [(title: String, tool: AnnotationTool)] = [
+        ("Pen", .pen),
+        ("Highlighter", .highlighter),
+        ("Line", .line),
+        ("Arrow", .arrow),
+        ("Rectangle", .rectangle),
+        ("Diamond", .diamond),
+        ("Ellipse", .ellipse),
+        ("Text", .text),
+        ("Select", .select),
+        ("Hand", .hand),
+        ("Eraser", .eraser)
+    ]
+
+    private static let drawingArrowheads: [(title: String, arrowhead: AnnotationArrowhead)] = [
+        ("None", .none),
+        ("Open Arrow", .arrow),
+        ("Triangle", .triangleOutline),
+        ("Filled Triangle", .triangle),
+        ("Circle", .circleOutline),
+        ("Filled Circle", .circle),
+        ("Diamond", .diamondOutline),
+        ("Filled Diamond", .diamond),
+        ("Bar / One", .bar),
+        ("Crow-foot / Many", .crowFoot),
+        ("One or Many", .oneOrMany),
+        ("Zero or One", .zeroOrOne),
+        ("Zero or Many", .zeroOrMany)
+    ]
+
     private func makeDrawTab() -> NSView {
         let help = makeLabel(
-            "Once zoomed, enter drawing mode by pressing the left mouse button; exit drawing mode by pressing the right mouse button. Undo with Command-Z or Ctrl+Z and erase all drawing by pressing E.",
+            "The horizontal tool strip stays available while drawing and typing. Its property inspector is always attached and appears automatically whenever the active tool or selection has supported properties.",
             wraps: true
         )
 
-        let penSection = makeSectionLabel("Pen Control")
-        let penHelp = makeLabel(
-            "Change the pen width with the mouse wheel, the [ and ] keys, or Shift with the up and down arrow keys.",
+        let toolbarSection = makeSectionLabel("Drawing Surface")
+
+        let rememberCheck = makeCheckbox(
+            "Remember the last tool and style:",
+            action: #selector(rememberLastDrawingStyleChanged(_:)),
+            state: settings.rememberLastDrawingStyle
+        )
+        rememberLastDrawingStyleCheckbox = rememberCheck
+
+        let resetPositionButton = NSButton(
+            title: "Reset Drawing UI Placement",
+            target: self,
+            action: #selector(resetDrawingUIPosition(_:))
+        )
+        resetPositionButton.bezelStyle = .rounded
+        resetPositionButton.isEnabled = hasCustomDrawingUIPlacement
+        resetDrawingUIPositionButton = resetPositionButton
+        let positionHelp = makeLabel(
+            "The toolbar and attached inspector move as one unit. A fresh session starts top-center; dragging unused toolbar background persists the combined position. The inspector has no title, pin, close, docking, visibility, or presentation controls. Propertyless tools naturally hide the card.",
+            wraps: true
+        )
+        let positionRow = makeRow([positionHelp, resetPositionButton])
+        let inspectorHelp = makeLabel(
+            "Rectangle/Diamond: Stroke, Background, width, style, Sloppiness, Edges, Opacity, Layers. Ellipse omits Edges. Arrow uses Sloppiness, Arrow type, Arrowheads, and S/M/L size. Line uses precise Architect rendering and Edges without fill. Pen uses Stroke, 3/7/11-point width, Smart Draw, Pressure, Opacity; Smart Draw hides Pressure while active. Highlighter uses Stroke, 10/18/28-point width, Opacity with a flat constant marker. Text uses Stroke, font, size, align, Opacity, Layers. Stroke and Background use separate five-color semantic palettes with solid square swatches, a divided custom tile, and light/dark resolved shades. Fill appears only for a nontransparent shape background; selection actions stay in context and overflow menus.",
             wraps: true
         )
 
-        let colorsSection = makeSectionLabel("Colors")
-        let colorsHelp = makeLabel(
-            "Change the pen color by pressing R, G, B, O, Y, P, W or K for red, green, blue, orange, yellow, pink, white or black.",
+        let defaultsSection = makeSectionLabel("Drawing Defaults")
+
+        let toolPopup = NSPopUpButton()
+        Self.defaultDrawingTools.forEach { toolPopup.addItem(withTitle: $0.title) }
+        toolPopup.selectItem(
+            at: Self.defaultDrawingTools.firstIndex {
+                $0.tool == settings.defaultDrawingDefaults.tool
+            } ?? 0
+        )
+        toolPopup.target = self
+        toolPopup.action = #selector(defaultDrawingToolChanged(_:))
+        defaultDrawingToolPopup = toolPopup
+
+        let widthStepper = NSStepper()
+        widthStepper.minValue = 1
+        widthStepper.maxValue = 64
+        widthStepper.increment = 0.5
+        widthStepper.doubleValue = Double(settings.rootPenWidth)
+        widthStepper.target = self
+        widthStepper.action = #selector(rootPenWidthChanged(_:))
+        rootPenWidthStepper = widthStepper
+        let widthLabel = makeLabel(Self.drawingWidthDescription(settings.rootPenWidth))
+        widthLabel.alignment = .right
+        widthLabel.font = .monospacedDigitSystemFont(
+            ofSize: NSFont.smallSystemFontSize,
+            weight: .regular
+        )
+        widthLabel.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        rootPenWidthLabel = widthLabel
+        let widthControl = makeRow([widthStepper, widthLabel])
+
+        let markerWidthStepper = NSStepper()
+        markerWidthStepper.minValue = 1
+        markerWidthStepper.maxValue = 64
+        markerWidthStepper.increment = 1
+        markerWidthStepper.doubleValue = Double(settings.highlighterWidth)
+        markerWidthStepper.target = self
+        markerWidthStepper.action = #selector(highlighterWidthChanged(_:))
+        highlighterWidthStepper = markerWidthStepper
+        let markerWidthLabel = makeLabel(
+            Self.drawingWidthDescription(settings.highlighterWidth)
+        )
+        markerWidthLabel.alignment = .right
+        markerWidthLabel.font = .monospacedDigitSystemFont(
+            ofSize: NSFont.smallSystemFontSize,
+            weight: .regular
+        )
+        markerWidthLabel.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        highlighterWidthLabel = markerWidthLabel
+        let markerWidthControl = makeRow([markerWidthStepper, markerWidthLabel])
+
+        let strokeColorWell = makeDrawingColorWell(
+            color: settings.defaultDrawingDefaults.strokeColor.nsColor,
+            action: #selector(defaultDrawingStrokeColorChanged(_:)),
+            accessibilityLabel: "Default stroke color"
+        )
+        defaultDrawingStrokeColorWell = strokeColorWell
+
+        let fillColorWell = makeDrawingColorWell(
+            color: settings.defaultDrawingDefaults.fillColor.nsColor,
+            action: #selector(defaultDrawingFillColorChanged(_:)),
+            accessibilityLabel: "Default fill color"
+        )
+        defaultDrawingFillColorWell = fillColorWell
+
+        let fillStylePopup = NSPopUpButton()
+        fillStylePopup.addItems(
+            withTitles: ["No Fill", "Hachure", "Cross-hatch", "Solid Fill"]
+        )
+        fillStylePopup.selectItem(
+            at: Self.fillStyleIndex(settings.defaultDrawingDefaults.fillStyle)
+        )
+        fillStylePopup.target = self
+        fillStylePopup.action = #selector(defaultDrawingFillStyleChanged(_:))
+        defaultDrawingFillStylePopup = fillStylePopup
+
+        let patternPopup = NSPopUpButton()
+        patternPopup.addItems(withTitles: ["Solid", "Dashed", "Dotted"])
+        patternPopup.selectItem(
+            at: Self.strokePatternIndex(settings.defaultDrawingDefaults.strokePattern)
+        )
+        patternPopup.target = self
+        patternPopup.action = #selector(defaultDrawingStrokePatternChanged(_:))
+        defaultDrawingStrokePatternPopup = patternPopup
+
+        let sloppinessPopup = NSPopUpButton()
+        sloppinessPopup.addItems(
+            withTitles: AnnotationSloppiness.allCases.map(\.displayName)
+        )
+        sloppinessPopup.selectItem(
+            at: settings.defaultDrawingDefaults.sloppiness.rawValue
+        )
+        sloppinessPopup.target = self
+        sloppinessPopup.action = #selector(defaultDrawingSloppinessChanged(_:))
+        sloppinessPopup.toolTip =
+            "Architect is precise, Artist is moderately hand-drawn, and Cartoonist is rough."
+        defaultDrawingSloppinessPopup = sloppinessPopup
+
+        let opacitySlider = NSSlider(
+            value: Double(settings.defaultDrawingDefaults.opacity),
+            minValue: 0.05,
+            maxValue: 1,
+            target: self,
+            action: #selector(defaultDrawingOpacityChanged(_:))
+        )
+        opacitySlider.isContinuous = true
+        opacitySlider.widthAnchor.constraint(equalToConstant: 170).isActive = true
+        defaultDrawingOpacitySlider = opacitySlider
+        let opacityLabel = makeLabel(
+            Self.drawingOpacityDescription(settings.defaultDrawingDefaults.opacity)
+        )
+        opacityLabel.alignment = .right
+        opacityLabel.font = .monospacedDigitSystemFont(
+            ofSize: NSFont.smallSystemFontSize,
+            weight: .regular
+        )
+        opacityLabel.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        defaultDrawingOpacityLabel = opacityLabel
+        let opacityControl = makeRow([opacitySlider, opacityLabel])
+
+        let roundnessPopup = NSPopUpButton()
+        roundnessPopup.addItems(withTitles: ["Sharp", "Soft", "Round"])
+        roundnessPopup.selectItem(
+            at: Self.roundnessIndex(settings.defaultDrawingDefaults.roundness)
+        )
+        roundnessPopup.target = self
+        roundnessPopup.action = #selector(defaultDrawingRoundnessChanged(_:))
+        defaultDrawingRoundnessPopup = roundnessPopup
+
+        let pressurePopup = NSPopUpButton()
+        pressurePopup.addItems(
+            withTitles: AnnotationPressureMode.allCases.map(\.displayName)
+        )
+        pressurePopup.selectItem(
+            at: AnnotationPressureMode.allCases.firstIndex(
+                of: settings.defaultDrawingDefaults.pressureMode
+            ) ?? 0
+        )
+        pressurePopup.target = self
+        pressurePopup.action = #selector(defaultDrawingPressureChanged(_:))
+        pressurePopup.setAccessibilityLabel("Default freehand pressure input")
+        pressurePopup.toolTip =
+            "Mouse speed uses filtered timestamped velocity, bounded width changes, short tapers, and uniformly resampled centerlines."
+        defaultDrawingPressurePopup = pressurePopup
+        let smoothingCheck = makeCheckbox(
+            "Smooth freehand strokes:",
+            action: #selector(defaultDrawingSmoothingChanged(_:)),
+            state: settings.defaultDrawingDefaults.smoothingEnabled
+        )
+        defaultDrawingSmoothingCheckbox = smoothingCheck
+        let smartDrawCheck = makeCheckbox(
+            "Recognize clean shapes with Smart Draw:",
+            action: #selector(defaultDrawingSmartDrawChanged(_:)),
+            state: settings.defaultDrawingDefaults.smartDrawEnabled
+        )
+        smartDrawCheck.toolTip =
+            "When Pen is selected, freehand circles, ellipses, rectangles, diamonds, and arrows can become robustly fitted clean shapes"
+        defaultDrawingSmartDrawCheckbox = smartDrawCheck
+        let smartDrawHelp = makeLabel(
+            "Smart Draw is off by default and only applies to Pen. The wand toggle is also available directly in Pen properties. Enabling it temporarily forces fixed pressure and restores the saved Pen pressure mode when disabled. Stable candidates show a shadow preview; uncertain strokes remain freehand.",
             wraps: true
         )
 
-        let highlightSection = makeSectionLabel("Highlight")
-        let highlightHelp = makeLabel(
-            "Hold Shift with a color key, for example Shift+R, to draw with a translucent highlighter of that color. Press the color key again without Shift to return to a solid pen.",
-            wraps: true
+        let lineRoutePopup = makeLinearRoutePopup(
+            selected: settings.defaultDrawingDefaults.lineRoute,
+            action: #selector(defaultDrawingLineRouteChanged(_:))
         )
-
-        let shapesSection = makeSectionLabel("Shapes")
-        let shapesHelp = makeLabel(
-            "Hold Shift for a line, Control for a rectangle, Tab for an ellipse, or Shift+Control for an arrow while dragging.",
-            wraps: true
+        defaultDrawingLineRoutePopup = lineRoutePopup
+        let arrowRoutePopup = makeLinearRoutePopup(
+            selected: settings.defaultDrawingDefaults.arrowRoute,
+            action: #selector(defaultDrawingArrowRouteChanged(_:))
         )
+        defaultDrawingArrowRoutePopup = arrowRoutePopup
 
-        let screenSection = makeSectionLabel("Screen")
-        let screenHelp = makeLabel(
-            "Press Ctrl+W or Ctrl+K to blank the screen white or black as a sketch pad.",
+        let startArrowheadPopup = makeArrowheadPopup(
+            selected: settings.defaultDrawingDefaults.startArrowhead,
+            action: #selector(defaultDrawingStartArrowheadChanged(_:))
+        )
+        defaultDrawingStartArrowheadPopup = startArrowheadPopup
+        let endArrowheadPopup = makeArrowheadPopup(
+            selected: settings.defaultDrawingDefaults.endArrowhead,
+            action: #selector(defaultDrawingEndArrowheadChanged(_:))
+        )
+        defaultDrawingEndArrowheadPopup = endArrowheadPopup
+        let arrowheadSizePopup = NSPopUpButton()
+        arrowheadSizePopup.addItems(
+            withTitles: AnnotationArrowheadSize.allCases.map(\.displayName)
+        )
+        arrowheadSizePopup.selectItem(
+            at: AnnotationArrowheadSize.allCases.firstIndex(
+                of: settings.defaultDrawingDefaults.arrowheadSize
+            ) ?? 0
+        )
+        arrowheadSizePopup.target = self
+        arrowheadSizePopup.action = #selector(defaultDrawingArrowheadSizeChanged(_:))
+        defaultDrawingArrowheadSizePopup = arrowheadSizePopup
+
+        let defaultsGrid = makeFormGrid([
+            [makeLabel("Tool:"), toolPopup],
+            [makeLabel("Pen width:"), widthControl],
+            [makeLabel("Highlighter width:"), markerWidthControl],
+            [makeLabel("Stroke color:"), strokeColorWell],
+            [makeLabel("Fill:"), makeRow([fillStylePopup, fillColorWell])],
+            [makeLabel("Stroke:"), patternPopup],
+            [makeLabel("Sloppiness:"), sloppinessPopup],
+            [makeLabel("Opacity:"), opacityControl],
+            [makeLabel("Rectangle corners:"), roundnessPopup],
+            [makeLabel("Default line route:"), lineRoutePopup],
+            [makeLabel("Default arrow route:"), arrowRoutePopup],
+            [makeLabel("Start arrowhead:"), startArrowheadPopup],
+            [makeLabel("End arrowhead:"), endArrowheadPopup],
+            [makeLabel("Arrowhead size:"), arrowheadSizePopup]
+        ], rowSpacing: 7)
+
+        let shortcutsSection = makeSectionLabel("Keyboard Workflow")
+        let shortcutsHelp = makeLabel(
+            "Use F/L/A/H/T for pen, line, arrow, highlighter, and text; V for selection; Shift+E for the eraser; color keys for ink; [ and ] or Shift+Up/Down for width; Command-Z to undo; and E to clear. Modifier-drag shape shortcuts and Ctrl+W/Ctrl+K sketch pads remain available.",
             wraps: true
         )
 
@@ -1080,18 +1355,348 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
 
         return makeColumn([
             help,
-            penSection,
-            makeIndentedColumn([penHelp]),
-            colorsSection,
-            makeIndentedColumn([colorsHelp]),
-            highlightSection,
-            makeIndentedColumn([highlightHelp]),
-            shapesSection,
-            makeIndentedColumn([shapesHelp]),
-            screenSection,
-            makeIndentedColumn([screenHelp]),
+            toolbarSection,
+            makeIndentedColumn([positionRow, inspectorHelp]),
+            defaultsSection,
+            defaultsGrid,
+            makeCheckboxColumn([
+                rememberCheck,
+                makeRow([makeLabel("Pressure input:"), pressurePopup]),
+                smoothingCheck,
+                smartDrawCheck
+            ]),
+            makeIndentedColumn([smartDrawHelp]),
+            shortcutsSection,
+            makeIndentedColumn([shortcutsHelp]),
             drawHotKeyRow
-        ], spacing: 6)
+        ], spacing: 8)
+    }
+
+    private func makeDrawingColorWell(
+        color: NSColor,
+        action: Selector,
+        accessibilityLabel: String
+    ) -> NSColorWell {
+        let colorWell = NSColorWell()
+        colorWell.colorWellStyle = .minimal
+        colorWell.color = color
+        colorWell.target = self
+        colorWell.action = action
+        colorWell.setAccessibilityLabel(accessibilityLabel)
+        colorWell.widthAnchor.constraint(equalToConstant: 34).isActive = true
+        return colorWell
+    }
+
+    private func makeArrowheadPopup(
+        selected: AnnotationArrowhead,
+        action: Selector
+    ) -> NSPopUpButton {
+        let popup = NSPopUpButton()
+        Self.drawingArrowheads.forEach { popup.addItem(withTitle: $0.title) }
+        popup.selectItem(
+            at: Self.drawingArrowheads.firstIndex { $0.arrowhead == selected } ?? 0
+        )
+        popup.target = self
+        popup.action = action
+        return popup
+    }
+
+    private func makeLinearRoutePopup(
+        selected: AnnotationLinearRoute,
+        action: Selector
+    ) -> NSPopUpButton {
+        let popup = NSPopUpButton()
+        popup.addItems(withTitles: Self.drawingLinearRouteOptionsForTesting)
+        popup.selectItem(at: Self.linearRouteIndex(selected))
+        popup.target = self
+        popup.action = action
+        return popup
+    }
+
+    private func refreshDrawControls() {
+        rememberLastDrawingStyleCheckbox?.state =
+            settings.rememberLastDrawingStyle ? .on : .off
+        resetDrawingUIPositionButton?.isEnabled = hasCustomDrawingUIPlacement
+        if let index = Self.defaultDrawingTools.firstIndex(where: {
+            $0.tool == settings.defaultDrawingDefaults.tool
+        }) {
+            defaultDrawingToolPopup?.selectItem(at: index)
+        }
+        defaultDrawingStrokeColorWell?.color =
+            settings.defaultDrawingDefaults.strokeColor.nsColor
+        defaultDrawingFillColorWell?.color =
+            settings.defaultDrawingDefaults.fillColor.nsColor
+        defaultDrawingFillStylePopup?.selectItem(
+            at: Self.fillStyleIndex(settings.defaultDrawingDefaults.fillStyle)
+        )
+        rootPenWidthStepper?.doubleValue = Double(settings.rootPenWidth)
+        rootPenWidthLabel?.stringValue = Self.drawingWidthDescription(settings.rootPenWidth)
+        highlighterWidthStepper?.doubleValue = Double(settings.highlighterWidth)
+        highlighterWidthLabel?.stringValue = Self.drawingWidthDescription(
+            settings.highlighterWidth
+        )
+        defaultDrawingStrokePatternPopup?.selectItem(
+            at: Self.strokePatternIndex(settings.defaultDrawingDefaults.strokePattern)
+        )
+        defaultDrawingSloppinessPopup?.selectItem(
+            at: settings.defaultDrawingDefaults.sloppiness.rawValue
+        )
+        defaultDrawingSloppinessPopup?.isEnabled =
+            Self.defaultToolSupportsSloppiness(
+                settings.defaultDrawingDefaults.tool
+            )
+        defaultDrawingOpacitySlider?.doubleValue =
+            Double(settings.defaultDrawingDefaults.opacity)
+        defaultDrawingOpacityLabel?.stringValue =
+            Self.drawingOpacityDescription(settings.defaultDrawingDefaults.opacity)
+        defaultDrawingRoundnessPopup?.selectItem(
+            at: Self.roundnessIndex(settings.defaultDrawingDefaults.roundness)
+        )
+        defaultDrawingPressurePopup?.selectItem(
+            at: AnnotationPressureMode.allCases.firstIndex(
+                of: settings.defaultDrawingDefaults.pressureMode
+            ) ?? 0
+        )
+        defaultDrawingPressurePopup?.isEnabled =
+            !settings.defaultDrawingDefaults.smartDrawEnabled
+        defaultDrawingSmoothingCheckbox?.state =
+            settings.defaultDrawingDefaults.smoothingEnabled ? .on : .off
+        defaultDrawingSmartDrawCheckbox?.state =
+            settings.defaultDrawingDefaults.smartDrawEnabled ? .on : .off
+        defaultDrawingLineRoutePopup?.selectItem(
+            at: Self.linearRouteIndex(settings.defaultDrawingDefaults.lineRoute)
+        )
+        defaultDrawingArrowRoutePopup?.selectItem(
+            at: Self.linearRouteIndex(settings.defaultDrawingDefaults.arrowRoute)
+        )
+        defaultDrawingStartArrowheadPopup?.selectItem(
+            at: Self.drawingArrowheads.firstIndex {
+                $0.arrowhead == settings.defaultDrawingDefaults.startArrowhead
+            } ?? 0
+        )
+        defaultDrawingEndArrowheadPopup?.selectItem(
+            at: Self.drawingArrowheads.firstIndex {
+                $0.arrowhead == settings.defaultDrawingDefaults.endArrowhead
+            } ?? 0
+        )
+        defaultDrawingArrowheadSizePopup?.selectItem(
+            at: AnnotationArrowheadSize.allCases.firstIndex {
+                $0 == settings.defaultDrawingDefaults.arrowheadSize
+            } ?? 0
+        )
+    }
+
+    @objc private func rememberLastDrawingStyleChanged(_ sender: NSButton) {
+        settings.rememberLastDrawingStyle = sender.state == .on
+        persist()
+    }
+
+    @objc private func resetDrawingUIPosition(_ sender: NSButton) {
+        settings.drawingToolbarNormalizedPosition = nil
+        refreshDrawControls()
+        sender.isEnabled = false
+        persist()
+    }
+
+    private var hasCustomDrawingUIPlacement: Bool {
+        settings.drawingToolbarNormalizedPosition != nil
+    }
+
+    @objc private func defaultDrawingToolChanged(_ sender: NSPopUpButton) {
+        guard Self.defaultDrawingTools.indices.contains(sender.indexOfSelectedItem) else {
+            return
+        }
+        settings.defaultDrawingDefaults.selectTool(
+            Self.defaultDrawingTools[sender.indexOfSelectedItem].tool
+        )
+        refreshDrawControls()
+        persist()
+    }
+
+    @objc private func rootPenWidthChanged(_ sender: NSStepper) {
+        settings.rootPenWidth = CGFloat(sender.doubleValue)
+        rootPenWidthLabel?.stringValue = Self.drawingWidthDescription(settings.rootPenWidth)
+        persist()
+    }
+
+    @objc private func highlighterWidthChanged(_ sender: NSStepper) {
+        settings.highlighterWidth = CGFloat(sender.doubleValue)
+        highlighterWidthLabel?.stringValue = Self.drawingWidthDescription(
+            settings.highlighterWidth
+        )
+        persist()
+    }
+
+    @objc private func defaultDrawingStrokeColorChanged(_ sender: NSColorWell) {
+        settings.defaultDrawingDefaults.strokeColor = Self.annotationColorValue(sender.color)
+        persist()
+    }
+
+    @objc private func defaultDrawingFillColorChanged(_ sender: NSColorWell) {
+        settings.defaultDrawingDefaults.fillColor = Self.annotationColorValue(sender.color)
+        persist()
+    }
+
+    @objc private func defaultDrawingFillStyleChanged(_ sender: NSPopUpButton) {
+        guard AnnotationFillStyle.allCases.indices.contains(sender.indexOfSelectedItem) else {
+            return
+        }
+        settings.defaultDrawingDefaults.fillStyle =
+            AnnotationFillStyle.allCases[sender.indexOfSelectedItem]
+        persist()
+    }
+
+    @objc private func defaultDrawingStrokePatternChanged(_ sender: NSPopUpButton) {
+        let patterns: [AnnotationStrokePattern] = [.solid, .dashed, .dotted]
+        guard patterns.indices.contains(sender.indexOfSelectedItem) else { return }
+        settings.defaultDrawingDefaults.strokePattern = patterns[sender.indexOfSelectedItem]
+        persist()
+    }
+
+    @objc private func defaultDrawingSloppinessChanged(_ sender: NSPopUpButton) {
+        guard Self.defaultToolSupportsSloppiness(
+            settings.defaultDrawingDefaults.tool
+        ) else {
+            refreshDrawControls()
+            return
+        }
+        guard let sloppiness = AnnotationSloppiness(
+            rawValue: sender.indexOfSelectedItem
+        ) else {
+            return
+        }
+        settings.defaultDrawingDefaults.setSloppinessForSelectedTool(sloppiness)
+        persist()
+    }
+
+    private static func defaultToolSupportsSloppiness(
+        _ tool: AnnotationTool
+    ) -> Bool {
+        switch tool {
+        case .pen, .arrow, .rectangle, .diamond, .ellipse:
+            true
+        case .hand, .select, .line, .text, .highlighter, .eraser:
+            false
+        }
+    }
+
+    @objc private func defaultDrawingOpacityChanged(_ sender: NSSlider) {
+        settings.defaultDrawingDefaults.setOpacityForSelectedTool(
+            CGFloat(sender.doubleValue)
+        )
+        defaultDrawingOpacityLabel?.stringValue =
+            Self.drawingOpacityDescription(settings.defaultDrawingDefaults.opacity)
+        persist()
+    }
+
+    @objc private func defaultDrawingRoundnessChanged(_ sender: NSPopUpButton) {
+        let values: [CGFloat?] = [nil, 8, 20]
+        guard values.indices.contains(sender.indexOfSelectedItem) else { return }
+        settings.defaultDrawingDefaults.roundness = values[sender.indexOfSelectedItem]
+        persist()
+    }
+
+    @objc private func defaultDrawingPressureChanged(_ sender: NSPopUpButton) {
+        guard !settings.defaultDrawingDefaults.smartDrawEnabled else { return }
+        guard AnnotationPressureMode.allCases.indices.contains(sender.indexOfSelectedItem) else {
+            return
+        }
+        settings.defaultDrawingDefaults.pressureMode =
+            AnnotationPressureMode.allCases[sender.indexOfSelectedItem]
+        persist()
+    }
+
+    @objc private func defaultDrawingSmoothingChanged(_ sender: NSButton) {
+        settings.defaultDrawingDefaults.smoothingEnabled = sender.state == .on
+        persist()
+    }
+
+    @objc private func defaultDrawingSmartDrawChanged(_ sender: NSButton) {
+        settings.defaultDrawingDefaults.setSmartDrawEnabled(sender.state == .on)
+        refreshDrawControls()
+        persist()
+    }
+
+    @objc private func defaultDrawingLineRouteChanged(_ sender: NSPopUpButton) {
+        let routes = AnnotationLinearRoute.userSelectableRoutes
+        guard routes.indices.contains(sender.indexOfSelectedItem) else { return }
+        settings.defaultDrawingDefaults.lineRoute = routes[sender.indexOfSelectedItem]
+        persist()
+    }
+
+    @objc private func defaultDrawingArrowRouteChanged(_ sender: NSPopUpButton) {
+        let routes = AnnotationLinearRoute.userSelectableRoutes
+        guard routes.indices.contains(sender.indexOfSelectedItem) else { return }
+        settings.defaultDrawingDefaults.arrowRoute = routes[sender.indexOfSelectedItem]
+        persist()
+    }
+
+    @objc private func defaultDrawingStartArrowheadChanged(_ sender: NSPopUpButton) {
+        guard Self.drawingArrowheads.indices.contains(sender.indexOfSelectedItem) else {
+            return
+        }
+        settings.defaultDrawingDefaults.startArrowhead =
+            Self.drawingArrowheads[sender.indexOfSelectedItem].arrowhead
+        persist()
+    }
+
+    @objc private func defaultDrawingEndArrowheadChanged(_ sender: NSPopUpButton) {
+        guard Self.drawingArrowheads.indices.contains(sender.indexOfSelectedItem) else {
+            return
+        }
+        settings.defaultDrawingDefaults.endArrowhead =
+            Self.drawingArrowheads[sender.indexOfSelectedItem].arrowhead
+        persist()
+    }
+
+    @objc private func defaultDrawingArrowheadSizeChanged(_ sender: NSPopUpButton) {
+        guard AnnotationArrowheadSize.allCases.indices.contains(
+            sender.indexOfSelectedItem
+        ) else {
+            return
+        }
+        settings.defaultDrawingDefaults.arrowheadSize =
+            AnnotationArrowheadSize.allCases[sender.indexOfSelectedItem]
+        persist()
+    }
+
+    private static func strokePatternIndex(_ pattern: AnnotationStrokePattern) -> Int {
+        switch pattern {
+        case .solid: 0
+        case .dashed: 1
+        case .dotted: 2
+        }
+    }
+
+    private static func fillStyleIndex(_ fillStyle: AnnotationFillStyle) -> Int {
+        AnnotationFillStyle.allCases.firstIndex(of: fillStyle) ?? 0
+    }
+
+    private static func linearRouteIndex(_ route: AnnotationLinearRoute) -> Int {
+        AnnotationLinearRoute.userSelectableRoutes.firstIndex(of: route) ?? 0
+    }
+
+    private static func roundnessIndex(_ roundness: CGFloat?) -> Int {
+        guard let roundness else { return 0 }
+        return roundness < 14 ? 1 : 2
+    }
+
+    private static func drawingWidthDescription(_ width: CGFloat) -> String {
+        String(format: "%.1f pt", width)
+    }
+
+    private static func drawingOpacityDescription(_ opacity: CGFloat) -> String {
+        "\(Int((opacity * 100).rounded()))%"
+    }
+
+    private static func annotationColorValue(_ color: NSColor) -> AnnotationColorValue {
+        let converted = color.usingColorSpace(.sRGB) ?? color
+        return .rgba(
+            red: converted.redComponent,
+            green: converted.greenComponent,
+            blue: converted.blueComponent,
+            alpha: converted.alphaComponent
+        )
     }
 
     // MARK: - Type tab
@@ -1728,6 +2333,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSTableViewDat
         let manager = sender as? NSFontManager ?? NSFontManager.shared
         let newFont = manager.convert(currentTypingFont())
         settings.typingFontName = newFont.fontName
+        settings.typingFontPreset = .typeSetting
         settings.typingFontSize = newFont.pointSize
         updateFontSample()
         persist()

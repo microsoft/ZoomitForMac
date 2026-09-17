@@ -4,3 +4,5 @@ DerivedData/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 .DS_Store
+.playwright-cli/
+.copilot-tracking/

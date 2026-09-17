@@ -1,10 +1,356 @@
 import Foundation
 
+struct DrawingDefaults: Equatable {
+    var tool: AnnotationTool
+    var strokeColor: AnnotationColorValue
+    var regularStrokeColor: AnnotationColorValue?
+    var highlighterStrokeColor: AnnotationColorValue?
+    var penStrokeWidth: CGFloat?
+    var highlighterStrokeWidth: CGFloat?
+    var geometryStrokeWidth: CGFloat?
+    var penOpacity: CGFloat?
+    var geometryOpacity: CGFloat?
+    var highlighterOpacity: CGFloat?
+    var fillColor: AnnotationColorValue
+    var fillStyle: AnnotationFillStyle
+    var strokePattern: AnnotationStrokePattern
+    var sloppiness: AnnotationSloppiness
+    var freehandSloppiness: AnnotationSloppiness
+    var outlinedSloppiness: AnnotationSloppiness
+    var opacity: CGFloat
+    var usesLegacyHighlightCompositing: Bool
+    var pressureMode: AnnotationPressureMode
+    var smoothingEnabled: Bool
+    var smartDrawEnabled: Bool
+    var smartDrawSavedPressureMode: AnnotationPressureMode?
+    var roundness: CGFloat?
+    var lineRoute: AnnotationLinearRoute
+    var arrowRoute: AnnotationLinearRoute
+    var startArrowhead: AnnotationArrowhead
+    var endArrowhead: AnnotationArrowhead
+    var arrowheadSize: AnnotationArrowheadSize
+
+    var linearRoute: AnnotationLinearRoute {
+        get {
+            tool == .arrow ? arrowRoute : lineRoute
+        }
+        set {
+            switch tool {
+            case .arrow:
+                arrowRoute = newValue
+            case .line:
+                lineRoute = newValue
+            default:
+                lineRoute = newValue
+                arrowRoute = newValue
+            }
+        }
+    }
+
+    var pressureEnabled: Bool {
+        get { pressureMode != .fixed }
+        set { pressureMode = newValue ? .tablet : .fixed }
+    }
+
+    static let `default` = DrawingDefaults(
+        tool: .pen,
+        strokeColor: .palette(.red),
+        fillColor: .palette(.red),
+        fillStyle: .none,
+        strokePattern: .solid,
+        sloppiness: .artist,
+        freehandSloppiness: .artist,
+        outlinedSloppiness: .artist,
+        opacity: 1,
+        pressureMode: .fixed,
+        smoothingEnabled: true,
+        smartDrawEnabled: false,
+        smartDrawSavedPressureMode: nil,
+        roundness: nil,
+        linearRoute: .straight,
+        lineRoute: .straight,
+        arrowRoute: .curved,
+        startArrowhead: .none,
+        endArrowhead: .arrow,
+        arrowheadSize: .medium,
+        usesLegacyHighlightCompositing: false
+    )
+
+    init(
+        tool: AnnotationTool,
+        strokeColor: AnnotationColorValue,
+        regularStrokeColor: AnnotationColorValue? = nil,
+        highlighterStrokeColor: AnnotationColorValue? = nil,
+        penStrokeWidth: CGFloat? = nil,
+        highlighterStrokeWidth: CGFloat? = nil,
+        geometryStrokeWidth: CGFloat? = nil,
+        penOpacity: CGFloat? = nil,
+        geometryOpacity: CGFloat? = nil,
+        highlighterOpacity: CGFloat? = nil,
+        fillColor: AnnotationColorValue,
+        fillStyle: AnnotationFillStyle,
+        strokePattern: AnnotationStrokePattern,
+        sloppiness: AnnotationSloppiness = .artist,
+        freehandSloppiness: AnnotationSloppiness? = nil,
+        outlinedSloppiness: AnnotationSloppiness? = nil,
+        opacity: CGFloat,
+        pressureEnabled: Bool = false,
+        pressureMode: AnnotationPressureMode? = nil,
+        smoothingEnabled: Bool,
+        smartDrawEnabled: Bool,
+        smartDrawSavedPressureMode: AnnotationPressureMode? = nil,
+        roundness: CGFloat?,
+        linearRoute: AnnotationLinearRoute,
+        lineRoute: AnnotationLinearRoute? = nil,
+        arrowRoute: AnnotationLinearRoute? = nil,
+        startArrowhead: AnnotationArrowhead,
+        endArrowhead: AnnotationArrowhead,
+        arrowheadSize: AnnotationArrowheadSize = .small,
+        usesLegacyHighlightCompositing: Bool = false
+    ) {
+        self.tool = tool
+        self.strokeColor = strokeColor
+        self.regularStrokeColor = regularStrokeColor
+        self.highlighterStrokeColor = highlighterStrokeColor
+        self.penStrokeWidth = penStrokeWidth
+        self.highlighterStrokeWidth = highlighterStrokeWidth
+        self.geometryStrokeWidth = geometryStrokeWidth
+        self.penOpacity = penOpacity
+        self.geometryOpacity = geometryOpacity
+        self.highlighterOpacity = highlighterOpacity
+        self.fillColor = fillColor
+        self.fillStyle = fillStyle
+        self.strokePattern = strokePattern
+        self.sloppiness = sloppiness
+        self.freehandSloppiness = freehandSloppiness ?? sloppiness
+        self.outlinedSloppiness = outlinedSloppiness ?? sloppiness
+        self.opacity = opacity
+        self.usesLegacyHighlightCompositing = usesLegacyHighlightCompositing
+        let requestedPressureMode =
+            pressureMode ?? (pressureEnabled ? .tablet : .fixed)
+        self.pressureMode = smartDrawEnabled ? .fixed : requestedPressureMode
+        self.smoothingEnabled = smoothingEnabled
+        self.smartDrawEnabled = smartDrawEnabled
+        self.smartDrawSavedPressureMode = smartDrawEnabled
+            ? (smartDrawSavedPressureMode ?? (
+                requestedPressureMode == .fixed ? nil : requestedPressureMode
+            ))
+            : nil
+        self.roundness = roundness
+        self.lineRoute = lineRoute ?? linearRoute
+        self.arrowRoute = arrowRoute ?? linearRoute
+        self.startArrowhead = startArrowhead
+        self.endArrowhead = endArrowhead
+        self.arrowheadSize = arrowheadSize
+    }
+
+    mutating func selectTool(_ selectedTool: AnnotationTool) {
+        setSloppinessForSelectedTool(sloppiness)
+        setOpacityForSelectedTool(opacity)
+        let arrowheads = AnnotationLinearToolTransition.arrowheads(
+            selecting: selectedTool,
+            startArrowhead: startArrowhead,
+            endArrowhead: endArrowhead
+        )
+        tool = selectedTool
+        sloppiness = scopedSloppiness(for: selectedTool)
+        opacity = scopedOpacity(for: selectedTool)
+        startArrowhead = arrowheads.start
+        endArrowhead = arrowheads.end
+    }
+
+    mutating func setSloppinessForSelectedTool(
+        _ selectedSloppiness: AnnotationSloppiness
+    ) {
+        switch tool {
+        case .pen:
+            freehandSloppiness = selectedSloppiness
+            sloppiness = selectedSloppiness
+        case .line:
+            sloppiness = .architect
+        case .rectangle, .diamond, .ellipse, .arrow:
+            outlinedSloppiness = selectedSloppiness
+            sloppiness = selectedSloppiness
+        case .highlighter:
+            sloppiness = .architect
+        case .hand, .select, .text, .eraser:
+            sloppiness = selectedSloppiness
+        }
+    }
+
+    func scopedSloppiness(for tool: AnnotationTool) -> AnnotationSloppiness {
+        switch tool {
+        case .pen:
+            freehandSloppiness
+        case .line:
+            .architect
+        case .rectangle, .diamond, .ellipse, .arrow:
+            outlinedSloppiness
+        case .highlighter:
+            .architect
+        case .hand, .select, .text, .eraser:
+            sloppiness
+        }
+    }
+
+    mutating func synchronizeSelectedSloppiness() {
+        sloppiness = scopedSloppiness(for: tool)
+    }
+
+    mutating func setOpacityForSelectedTool(_ selectedOpacity: CGFloat) {
+        let normalizedOpacity = min(max(selectedOpacity, 0.05), 1)
+        switch tool {
+        case .pen:
+            penOpacity = normalizedOpacity
+        case .highlighter:
+            highlighterOpacity = normalizedOpacity
+        case .line, .rectangle, .diamond, .ellipse, .arrow:
+            geometryOpacity = normalizedOpacity
+        case .hand, .select, .text, .eraser:
+            break
+        }
+        opacity = normalizedOpacity
+    }
+
+    func scopedOpacity(for tool: AnnotationTool) -> CGFloat {
+        switch tool {
+        case .pen:
+            penOpacity ?? (self.tool == .pen ? opacity : 1)
+        case .highlighter:
+            highlighterOpacity ?? (self.tool == .highlighter ? opacity : 1)
+        case .line, .rectangle, .diamond, .ellipse, .arrow:
+            geometryOpacity ?? (
+                Self.isGeometryTool(self.tool) ? opacity : 1
+            )
+        case .hand, .select, .text, .eraser:
+            opacity
+        }
+    }
+
+    mutating func synchronizeSelectedOpacity() {
+        opacity = scopedOpacity(for: tool)
+    }
+
+    init(
+        tool: AnnotationTool,
+        style: AnnotationStyle,
+        smartDrawEnabled: Bool,
+        linearRoute: AnnotationLinearRoute,
+        startArrowhead: AnnotationArrowhead,
+        endArrowhead: AnnotationArrowhead,
+        lineRoute: AnnotationLinearRoute? = nil,
+        arrowRoute: AnnotationLinearRoute? = nil,
+        arrowheadSize: AnnotationArrowheadSize = .small,
+        smartDrawSavedPressureMode: AnnotationPressureMode? = nil,
+        regularStrokeColor: AnnotationColorValue? = nil,
+        highlighterStrokeColor: AnnotationColorValue? = nil,
+        penStrokeWidth: CGFloat? = nil,
+        highlighterStrokeWidth: CGFloat? = nil,
+        geometryStrokeWidth: CGFloat? = nil,
+        penOpacity: CGFloat? = nil,
+        geometryOpacity: CGFloat? = nil,
+        highlighterOpacity: CGFloat? = nil,
+        freehandSloppiness: AnnotationSloppiness? = nil,
+        outlinedSloppiness: AnnotationSloppiness? = nil
+    ) {
+        self.init(
+            tool: tool,
+            strokeColor: style.strokeColor,
+            regularStrokeColor: regularStrokeColor,
+            highlighterStrokeColor: highlighterStrokeColor,
+            penStrokeWidth: penStrokeWidth,
+            highlighterStrokeWidth: highlighterStrokeWidth,
+            geometryStrokeWidth: geometryStrokeWidth,
+            penOpacity: penOpacity,
+            geometryOpacity: geometryOpacity,
+            highlighterOpacity: highlighterOpacity,
+            fillColor: style.fillColor,
+            fillStyle: style.fillStyle,
+            strokePattern: style.strokePattern,
+            sloppiness: style.sloppiness,
+            freehandSloppiness: freehandSloppiness,
+            outlinedSloppiness: outlinedSloppiness,
+            opacity: style.opacity,
+            pressureEnabled: style.pressureEnabled,
+            pressureMode: style.pressureMode,
+            smoothingEnabled: style.smoothingEnabled,
+            smartDrawEnabled: smartDrawEnabled,
+            smartDrawSavedPressureMode: smartDrawSavedPressureMode,
+            roundness: style.roundness,
+            linearRoute: linearRoute,
+            lineRoute: lineRoute,
+            arrowRoute: arrowRoute,
+            startArrowhead: startArrowhead,
+            endArrowhead: endArrowhead,
+            arrowheadSize: arrowheadSize,
+            usesLegacyHighlightCompositing: style.usesLegacyHighlightCompositing
+        )
+    }
+
+    mutating func setSmartDrawEnabled(_ isEnabled: Bool) {
+        guard smartDrawEnabled != isEnabled else { return }
+        if isEnabled {
+            if pressureMode != .fixed {
+                smartDrawSavedPressureMode = pressureMode
+            }
+            pressureMode = .fixed
+        } else if let savedMode = smartDrawSavedPressureMode {
+            pressureMode = savedMode
+            smartDrawSavedPressureMode = nil
+        }
+        smartDrawEnabled = isEnabled
+    }
+
+    mutating func normalizeSmartDrawPressure() {
+        guard smartDrawEnabled else {
+            smartDrawSavedPressureMode = nil
+            return
+        }
+        if pressureMode != .fixed {
+            smartDrawSavedPressureMode = pressureMode
+        }
+        pressureMode = .fixed
+    }
+
+    func annotationStyle(strokeWidth: CGFloat) -> AnnotationStyle {
+        var style = AnnotationStyle(
+            color: strokeColor.paletteColor ?? .red,
+            rootWidth: strokeWidth,
+            alpha: scopedOpacity(for: tool),
+            fillColor: fillColor,
+            fillStyle: fillStyle,
+            strokePattern: strokePattern,
+            sloppiness: scopedSloppiness(for: tool),
+            roundness: roundness,
+            pressureEnabled: pressureEnabled,
+            pressureMode: pressureMode,
+            smoothingEnabled: smoothingEnabled,
+            usesLegacyHighlightCompositing: usesLegacyHighlightCompositing
+        )
+        style.strokeColor = strokeColor
+        return style
+    }
+
+    private static func isGeometryTool(_ tool: AnnotationTool) -> Bool {
+        switch tool {
+        case .line, .rectangle, .diamond, .ellipse, .arrow:
+            true
+        case .hand, .select, .pen, .text, .highlighter, .eraser:
+            false
+        }
+    }
+}
+
 struct AppSettings: Equatable {
     var defaultZoomFactor: CGFloat
     var maximumZoomFactor: CGFloat
     var minimumZoomFactor: CGFloat
     var rootPenWidth: CGFloat
+    var highlighterWidth: CGFloat
+    var drawingToolbarNormalizedPosition: CGPoint?
+    var defaultDrawingDefaults: DrawingDefaults
+    var rememberLastDrawingStyle: Bool
+    var lastDrawingDefaults: DrawingDefaults?
     var animateZoom: Bool
     var smoothImage: Bool
     /// The user's desired launch-at-login state. The actual macOS login item
@@ -12,6 +358,7 @@ struct AppSettings: Equatable {
     /// separately and reconciled on launch.
     var launchAtLogin: Bool
     var typingFontName: String
+    var typingFontPreset: AnnotationTextFontPreset
     var typingFontSize: CGFloat
     /// Virtual key code (kVK_*) and NSEvent modifier-flag raw value for the
     /// global "toggle zoom" hotkey.
@@ -121,11 +468,17 @@ struct AppSettings: Equatable {
         defaultZoomFactor: 2,
         maximumZoomFactor: 32,
         minimumZoomFactor: 1,
-        rootPenWidth: 5,
+        rootPenWidth: AnnotationStrokeWidthDefaults.pen,
+        highlighterWidth: AnnotationStrokeWidthDefaults.highlighter,
+        drawingToolbarNormalizedPosition: nil,
+        defaultDrawingDefaults: .default,
+        rememberLastDrawingStyle: false,
+        lastDrawingDefaults: nil,
         animateZoom: true,
         smoothImage: true,
         launchAtLogin: false,
         typingFontName: "",
+        typingFontPreset: .system,
         typingFontSize: 20,
         // Control+1 (kVK_ANSI_1 = 18, NSEvent.ModifierFlags.control = 1 << 18).
         hotKeyCode: 18,
@@ -200,15 +553,23 @@ protocol SettingsStore {
 }
 
 final class UserDefaultsSettingsStore: SettingsStore {
+    private static let drawingDefaultsSchemaVersion = 1
+
     private enum Key {
         static let defaultZoomFactor = "defaultZoomFactor"
         static let maximumZoomFactor = "maximumZoomFactor"
         static let minimumZoomFactor = "minimumZoomFactor"
         static let rootPenWidth = "rootPenWidth"
+        static let highlighterWidth = "highlighterWidth"
+        static let drawingToolbarNormalizedPosition = "drawingToolbarNormalizedPosition"
+        static let defaultDrawingDefaults = "defaultDrawingDefaults"
+        static let rememberLastDrawingStyle = "rememberLastDrawingStyle"
+        static let lastDrawingDefaults = "lastDrawingDefaults"
         static let animateZoom = "animateZoom"
         static let smoothImage = "smoothImage"
         static let launchAtLogin = "launchAtLogin"
         static let typingFontName = "typingFontName"
+        static let typingFontPreset = "typingFontPreset"
         static let typingFontSize = "typingFontSize"
         static let hotKeyCode = "hotKeyCode"
         static let hotKeyModifiers = "hotKeyModifiers"
@@ -311,8 +672,36 @@ final class UserDefaultsSettingsStore: SettingsStore {
             settings.minimumZoomFactor = defaults.double(forKey: Key.minimumZoomFactor)
         }
 
-        if defaults.object(forKey: Key.rootPenWidth) != nil {
-            settings.rootPenWidth = defaults.double(forKey: Key.rootPenWidth)
+        if let width = Self.finiteCGFloat(defaults.object(forKey: Key.rootPenWidth)) {
+            settings.rootPenWidth = min(max(width, 1), 64)
+        }
+        if defaults.object(forKey: Key.highlighterWidth) != nil {
+            let width = defaults.double(forKey: Key.highlighterWidth)
+            if width.isFinite {
+                settings.highlighterWidth = min(max(width, 1), 64)
+            }
+        }
+
+        if let storedPosition = defaults.dictionary(forKey: Key.drawingToolbarNormalizedPosition) {
+            settings.drawingToolbarNormalizedPosition = Self.decodeNormalizedPosition(storedPosition)
+        }
+
+        if let storedDefaults = defaults.dictionary(forKey: Key.defaultDrawingDefaults) {
+            settings.defaultDrawingDefaults = Self.decodeDrawingDefaults(
+                storedDefaults,
+                fallback: settings.defaultDrawingDefaults
+            )
+        }
+
+        if defaults.object(forKey: Key.rememberLastDrawingStyle) != nil {
+            settings.rememberLastDrawingStyle = defaults.bool(forKey: Key.rememberLastDrawingStyle)
+        }
+
+        if let storedDefaults = defaults.dictionary(forKey: Key.lastDrawingDefaults) {
+            settings.lastDrawingDefaults = Self.decodeDrawingDefaults(
+                storedDefaults,
+                fallback: settings.defaultDrawingDefaults
+            )
         }
 
         if defaults.object(forKey: Key.animateZoom) != nil {
@@ -329,6 +718,15 @@ final class UserDefaultsSettingsStore: SettingsStore {
 
         if let name = defaults.string(forKey: Key.typingFontName) {
             settings.typingFontName = name
+        }
+
+        if let name = defaults.string(forKey: Key.typingFontPreset),
+           let preset = AnnotationTextFontPreset(rawValue: name) {
+            settings.typingFontPreset = preset
+        } else {
+            settings.typingFontPreset = AnnotationTextFontPreset.inferred(
+                fromStorageFontName: settings.typingFontName
+            )
         }
 
         if defaults.object(forKey: Key.typingFontSize) != nil {
@@ -531,10 +929,33 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(settings.maximumZoomFactor, forKey: Key.maximumZoomFactor)
         defaults.set(settings.minimumZoomFactor, forKey: Key.minimumZoomFactor)
         defaults.set(settings.rootPenWidth, forKey: Key.rootPenWidth)
+        defaults.set(settings.highlighterWidth, forKey: Key.highlighterWidth)
+        if let position = settings.drawingToolbarNormalizedPosition {
+            defaults.set(
+                ["x": Double(position.x), "y": Double(position.y)],
+                forKey: Key.drawingToolbarNormalizedPosition
+            )
+        } else {
+            defaults.removeObject(forKey: Key.drawingToolbarNormalizedPosition)
+        }
+        defaults.set(
+            Self.encodeDrawingDefaults(settings.defaultDrawingDefaults),
+            forKey: Key.defaultDrawingDefaults
+        )
+        defaults.set(settings.rememberLastDrawingStyle, forKey: Key.rememberLastDrawingStyle)
+        if let lastDrawingDefaults = settings.lastDrawingDefaults {
+            defaults.set(
+                Self.encodeDrawingDefaults(lastDrawingDefaults),
+                forKey: Key.lastDrawingDefaults
+            )
+        } else {
+            defaults.removeObject(forKey: Key.lastDrawingDefaults)
+        }
         defaults.set(settings.animateZoom, forKey: Key.animateZoom)
         defaults.set(settings.smoothImage, forKey: Key.smoothImage)
         defaults.set(settings.launchAtLogin, forKey: Key.launchAtLogin)
         defaults.set(settings.typingFontName, forKey: Key.typingFontName)
+        defaults.set(settings.typingFontPreset.rawValue, forKey: Key.typingFontPreset)
         defaults.set(settings.typingFontSize, forKey: Key.typingFontSize)
         defaults.set(settings.hotKeyCode, forKey: Key.hotKeyCode)
         defaults.set(Int(bitPattern: settings.hotKeyModifiers), forKey: Key.hotKeyModifiers)
@@ -583,5 +1004,353 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(settings.copySnipToClipboardOnSave, forKey: Key.copySnipToClipboardOnSave)
         defaults.set(settings.saveSnipToDirectory, forKey: Key.saveSnipToDirectory)
         defaults.set(settings.snipSaveDirectory, forKey: Key.snipSaveDirectory)
+    }
+
+    private static func encodeDrawingDefaults(_ drawingDefaults: DrawingDefaults) -> [String: Any] {
+        var drawingDefaults = drawingDefaults
+        drawingDefaults.normalizeSmartDrawPressure()
+        var encoded: [String: Any] = [
+            "schemaVersion": drawingDefaultsSchemaVersion,
+            "tool": toolName(drawingDefaults.tool),
+            "strokeColor": encodeColor(drawingDefaults.strokeColor),
+            "fillColor": encodeColor(drawingDefaults.fillColor),
+            "fillStyle": fillStyleName(drawingDefaults.fillStyle),
+            "strokePattern": strokePatternName(drawingDefaults.strokePattern),
+            "sloppiness": drawingDefaults.scopedSloppiness(
+                for: drawingDefaults.tool
+            ).rawValue,
+            "freehandSloppiness": drawingDefaults.freehandSloppiness.rawValue,
+            "outlinedSloppiness": drawingDefaults.outlinedSloppiness.rawValue,
+            "opacity": Double(
+                drawingDefaults.scopedOpacity(for: drawingDefaults.tool)
+            ),
+            "usesLegacyHighlightCompositing": drawingDefaults.usesLegacyHighlightCompositing,
+            "pressureMode": drawingDefaults.pressureMode.rawValue,
+            "smoothingEnabled": drawingDefaults.smoothingEnabled,
+            "smartDrawEnabled": drawingDefaults.smartDrawEnabled,
+            "lineRoute": linearRouteName(drawingDefaults.lineRoute),
+            "arrowRoute": linearRouteName(drawingDefaults.arrowRoute),
+            "startArrowhead": arrowheadName(drawingDefaults.startArrowhead),
+            "endArrowhead": arrowheadName(drawingDefaults.endArrowhead),
+            "arrowheadSize": drawingDefaults.arrowheadSize.rawValue
+        ]
+        if let savedPressureMode = drawingDefaults.smartDrawSavedPressureMode {
+            encoded["smartDrawSavedPressureMode"] = savedPressureMode.rawValue
+        }
+        if let regularStrokeColor = drawingDefaults.regularStrokeColor {
+            encoded["regularStrokeColor"] = encodeColor(regularStrokeColor)
+        }
+        if let highlighterStrokeColor = drawingDefaults.highlighterStrokeColor {
+            encoded["highlighterStrokeColor"] = encodeColor(highlighterStrokeColor)
+        }
+        if let penStrokeWidth = drawingDefaults.penStrokeWidth {
+            encoded["penStrokeWidth"] = Double(penStrokeWidth)
+        }
+        if let highlighterStrokeWidth = drawingDefaults.highlighterStrokeWidth {
+            encoded["highlighterStrokeWidth"] = Double(highlighterStrokeWidth)
+        }
+        if let geometryStrokeWidth = drawingDefaults.geometryStrokeWidth {
+            encoded["geometryStrokeWidth"] = Double(geometryStrokeWidth)
+        }
+        if let penOpacity = drawingDefaults.penOpacity {
+            encoded["penOpacity"] = Double(penOpacity)
+        }
+        if let geometryOpacity = drawingDefaults.geometryOpacity {
+            encoded["geometryOpacity"] = Double(geometryOpacity)
+        }
+        if let highlighterOpacity = drawingDefaults.highlighterOpacity {
+            encoded["highlighterOpacity"] = Double(highlighterOpacity)
+        }
+        if let roundness = drawingDefaults.roundness {
+            encoded["roundness"] = Double(roundness)
+        }
+        return encoded
+    }
+
+    private static func decodeDrawingDefaults(
+        _ encoded: [String: Any],
+        fallback: DrawingDefaults
+    ) -> DrawingDefaults {
+        guard (encoded["schemaVersion"] as? NSNumber)?.intValue
+            == drawingDefaultsSchemaVersion else {
+            return fallback
+        }
+
+        var decoded = fallback
+        if let name = encoded["tool"] as? String, let tool = tool(named: name) {
+            decoded.tool = tool
+        }
+        if let color = decodeColor(encoded["strokeColor"]) {
+            decoded.strokeColor = color
+        }
+        decoded.regularStrokeColor = decodeColor(encoded["regularStrokeColor"])
+        decoded.highlighterStrokeColor = decodeColor(encoded["highlighterStrokeColor"])
+        decoded.penStrokeWidth = finiteCGFloat(encoded["penStrokeWidth"]).map {
+            min(max($0, 1), 64)
+        }
+        decoded.highlighterStrokeWidth = finiteCGFloat(
+            encoded["highlighterStrokeWidth"]
+        ).map {
+            min(max($0, 1), 64)
+        }
+        decoded.geometryStrokeWidth = finiteCGFloat(
+            encoded["geometryStrokeWidth"]
+        ).map {
+            min(max($0, 1), 64)
+        }
+        decoded.penOpacity = finiteCGFloat(encoded["penOpacity"]).map {
+            min(max($0, 0.05), 1)
+        }
+        decoded.geometryOpacity = finiteCGFloat(encoded["geometryOpacity"]).map {
+            min(max($0, 0.05), 1)
+        }
+        decoded.highlighterOpacity = finiteCGFloat(
+            encoded["highlighterOpacity"]
+        ).map {
+            min(max($0, 0.05), 1)
+        }
+        if let color = decodeColor(encoded["fillColor"]) {
+            decoded.fillColor = color
+        }
+        if let name = encoded["fillStyle"] as? String, let fillStyle = fillStyle(named: name) {
+            decoded.fillStyle = fillStyle
+        }
+        if let name = encoded["strokePattern"] as? String,
+           let strokePattern = strokePattern(named: name) {
+            decoded.strokePattern = strokePattern
+        }
+        decoded.sloppiness = annotationSloppiness(encoded["sloppiness"])
+            ?? decoded.sloppiness
+        decoded.freehandSloppiness = annotationSloppiness(
+            encoded["freehandSloppiness"]
+        ) ?? decoded.freehandSloppiness
+        decoded.outlinedSloppiness = annotationSloppiness(
+            encoded["outlinedSloppiness"]
+        ) ?? decoded.outlinedSloppiness
+        decoded.synchronizeSelectedSloppiness()
+        if let opacity = finiteCGFloat(encoded["opacity"]) {
+            decoded.opacity = min(max(opacity, 0.05), 1)
+        }
+        decoded.synchronizeSelectedOpacity()
+        if let usesLegacyHighlightCompositing =
+            (encoded["usesLegacyHighlightCompositing"] as? NSNumber)?.boolValue {
+            decoded.usesLegacyHighlightCompositing = usesLegacyHighlightCompositing
+        }
+        if let name = encoded["pressureMode"] as? String,
+           let pressureMode = AnnotationPressureMode(rawValue: name) {
+            decoded.pressureMode = pressureMode
+        }
+        if let smoothingEnabled = (encoded["smoothingEnabled"] as? NSNumber)?.boolValue {
+            decoded.smoothingEnabled = smoothingEnabled
+        }
+        if let smartDrawEnabled = (encoded["smartDrawEnabled"] as? NSNumber)?.boolValue {
+            decoded.smartDrawEnabled = smartDrawEnabled
+        }
+        if let name = encoded["smartDrawSavedPressureMode"] as? String,
+           let savedMode = AnnotationPressureMode(rawValue: name),
+           savedMode != .fixed {
+            decoded.smartDrawSavedPressureMode = savedMode
+        }
+        decoded.roundness = finiteCGFloat(encoded["roundness"]).map {
+            max($0, 0)
+        }
+        if let name = encoded["lineRoute"] as? String,
+           let route = linearRoute(named: name) {
+            decoded.lineRoute = route
+        }
+        if let name = encoded["arrowRoute"] as? String,
+           let route = linearRoute(named: name) {
+            decoded.arrowRoute = route
+        }
+        if let name = encoded["startArrowhead"] as? String,
+           let arrowhead = arrowhead(named: name) {
+            decoded.startArrowhead = arrowhead
+        }
+        if let name = encoded["endArrowhead"] as? String,
+           let arrowhead = arrowhead(named: name) {
+            decoded.endArrowhead = arrowhead
+        }
+        if let name = encoded["arrowheadSize"] as? String,
+           let size = AnnotationArrowheadSize(rawValue: name) {
+            decoded.arrowheadSize = size
+        }
+        decoded.normalizeSmartDrawPressure()
+        return decoded
+    }
+
+    private static func annotationSloppiness(
+        _ value: Any?
+    ) -> AnnotationSloppiness? {
+        guard let rawValue = (value as? NSNumber)?.intValue else {
+            return nil
+        }
+        return AnnotationSloppiness(rawValue: rawValue)
+    }
+
+    private static func encodeColor(_ color: AnnotationColorValue) -> [String: Any] {
+        switch color {
+        case .palette(let palette):
+            return ["palette": palette.rawValue]
+        case .rgba(let red, let green, let blue, let alpha):
+            return [
+                "red": Double(red),
+                "green": Double(green),
+                "blue": Double(blue),
+                "alpha": Double(alpha)
+            ]
+        }
+    }
+
+    private static func decodeColor(_ value: Any?) -> AnnotationColorValue? {
+        guard let encoded = value as? [String: Any] else { return nil }
+        if let name = encoded["palette"] as? String, let palette = AnnotationColor(rawValue: name) {
+            return .palette(palette)
+        }
+        guard let red = finiteCGFloat(encoded["red"]),
+              let green = finiteCGFloat(encoded["green"]),
+              let blue = finiteCGFloat(encoded["blue"]),
+              let alpha = finiteCGFloat(encoded["alpha"]) else {
+            return nil
+        }
+        return .rgba(
+            red: min(max(red, 0), 1),
+            green: min(max(green, 0), 1),
+            blue: min(max(blue, 0), 1),
+            alpha: min(max(alpha, 0), 1)
+        )
+    }
+
+    private static func decodeNormalizedPosition(_ encoded: [String: Any]) -> CGPoint? {
+        guard let x = finiteCGFloat(encoded["x"]), let y = finiteCGFloat(encoded["y"]) else {
+            return nil
+        }
+        return CGPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+    }
+
+    private static func finiteCGFloat(_ value: Any?) -> CGFloat? {
+        guard let number = value as? NSNumber else { return nil }
+        let result = CGFloat(number.doubleValue)
+        return result.isFinite ? result : nil
+    }
+
+    private static func toolName(_ tool: AnnotationTool) -> String {
+        switch tool {
+        case .hand: "hand"
+        case .select: "select"
+        case .pen: "pen"
+        case .line: "line"
+        case .rectangle: "rectangle"
+        case .diamond: "diamond"
+        case .ellipse: "ellipse"
+        case .arrow: "arrow"
+        case .text: "text"
+        case .highlighter: "highlighter"
+        case .eraser: "eraser"
+        }
+    }
+
+    private static func tool(named name: String) -> AnnotationTool? {
+        switch name {
+        case "hand": .hand
+        case "select": .select
+        case "pen": .pen
+        case "line": .line
+        case "rectangle": .rectangle
+        case "diamond": .diamond
+        case "ellipse": .ellipse
+        case "arrow": .arrow
+        case "text": .text
+        case "highlighter": .highlighter
+        case "eraser": .eraser
+        default: nil
+        }
+    }
+
+    private static func fillStyleName(_ fillStyle: AnnotationFillStyle) -> String {
+        switch fillStyle {
+        case .none: "none"
+        case .hachure: "hachure"
+        case .crossHatch: "crossHatch"
+        case .solid: "solid"
+        }
+    }
+
+    private static func fillStyle(named name: String) -> AnnotationFillStyle? {
+        switch name {
+        case "none": AnnotationFillStyle.none
+        case "hachure": .hachure
+        case "crossHatch", "cross-hatch": .crossHatch
+        case "solid": .solid
+        default: nil
+        }
+    }
+
+    private static func strokePatternName(_ pattern: AnnotationStrokePattern) -> String {
+        switch pattern {
+        case .solid: "solid"
+        case .dashed: "dashed"
+        case .dotted: "dotted"
+        }
+    }
+
+    private static func strokePattern(named name: String) -> AnnotationStrokePattern? {
+        switch name {
+        case "solid": .solid
+        case "dashed": .dashed
+        case "dotted": .dotted
+        default: nil
+        }
+    }
+
+    private static func linearRouteName(_ route: AnnotationLinearRoute) -> String {
+        switch route {
+        case .straight: "straight"
+        case .curved: "curved"
+        }
+    }
+
+    private static func linearRoute(named name: String) -> AnnotationLinearRoute? {
+        switch name {
+        case "straight": .straight
+        case "curved": .curved
+        default: nil
+        }
+    }
+
+    private static func arrowheadName(_ arrowhead: AnnotationArrowhead) -> String {
+        switch arrowhead {
+        case .none: "none"
+        case .arrow: "arrow"
+        case .triangle: "triangle"
+        case .triangleOutline: "triangleOutline"
+        case .circle: "circle"
+        case .circleOutline: "circleOutline"
+        case .bar: "bar"
+        case .diamond: "diamond"
+        case .diamondOutline: "diamondOutline"
+        case .crowFoot: "crowFoot"
+        case .oneOrMany: "oneOrMany"
+        case .zeroOrOne: "zeroOrOne"
+        case .zeroOrMany: "zeroOrMany"
+        }
+    }
+
+    private static func arrowhead(named name: String) -> AnnotationArrowhead? {
+        switch name {
+        case "none": AnnotationArrowhead.none
+        case "arrow": .arrow
+        case "triangle": .triangle
+        case "triangleOutline", "triangle-outline": .triangleOutline
+        case "circle": .circle
+        case "circleOutline", "circle-outline": .circleOutline
+        case "bar": .bar
+        case "diamond": .diamond
+        case "diamondOutline", "diamond-outline": .diamondOutline
+        case "crowFoot", "crow-foot", "many": .crowFoot
+        case "oneOrMany", "one-or-many": .oneOrMany
+        case "zeroOrOne", "zero-or-one": .zeroOrOne
+        case "zeroOrMany", "zero-or-many": .zeroOrMany
+        default: nil
+        }
     }
 }

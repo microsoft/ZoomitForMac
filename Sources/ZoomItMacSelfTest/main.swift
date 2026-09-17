@@ -141,7 +141,16 @@ if args.count >= 2, args[1] == "--bench-stitch" {
 
 Task { @MainActor in
     do {
-        try SelfTestRunner.run()
+        if args.contains("--bench-drawing") {
+            SelfTestRunner.benchmarkDrawing()
+            Foundation.exit(EXIT_SUCCESS)
+        }
+        if args.contains("--test-drawing-interaction") {
+            try SelfTestRunner.testDrawingInteractionPerformance()
+            print("Drawing interaction tests: PASS")
+            Foundation.exit(EXIT_SUCCESS)
+        }
+        try await SelfTestRunner.run()
         print("ZoomItMacSelfTest: PASS")
         Foundation.exit(EXIT_SUCCESS)
     } catch {

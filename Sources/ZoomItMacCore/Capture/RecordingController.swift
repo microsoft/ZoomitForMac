@@ -23,6 +23,17 @@ private struct RecordingImageFrame: @unchecked Sendable {
     }
 }
 
+enum RecordingFrameReplacementPolicy {
+    enum Source: Equatable {
+        case screenStream
+        case overlaySnapshot
+    }
+
+    static func source(hasOverlaySnapshot: Bool) -> Source {
+        hasOverlaySnapshot ? .overlaySnapshot : .screenStream
+    }
+}
+
 /// Owns the AVAssetWriter and serialises all sample appends on its own queue so
 /// it can safely receive buffers from the ScreenCaptureKit and microphone
 /// capture callbacks (which run on background queues).
@@ -621,7 +632,9 @@ private final class RecordingStreamOutput: NSObject, SCStreamOutput, @unchecked 
     }
 
     private func finishOverlayFrame(image: CGImage?, fallback: SampleBufferBox, presentationTime: CMTime) {
-        if let image {
+        if RecordingFrameReplacementPolicy.source(
+            hasOverlaySnapshot: image != nil
+        ) == .overlaySnapshot, let image {
             engine.appendVideoImage(RecordingImageFrame(image: image, presentationTime: presentationTime))
         } else {
             engine.appendVideo(fallback)
@@ -724,7 +737,8 @@ final class RecordingController {
     private let webcam: WebcamOverlayController
     private let sampleQueue = DispatchQueue(label: "com.zoomitmac.recorder.samples")
     private var clipEditor: VideoClipEditorController?
-    var overlayFrameProvider: (@MainActor @Sendable (CGRect?) -> CGImage?)?
+    var overlayFrameProvider:
+        (@MainActor @Sendable (CGDirectDisplayID, CGRect?, CGSize) -> CGImage?)?
 
     init(
         captureService: ScreenCaptureService,
@@ -741,35 +755,66 @@ final class RecordingController {
 
     /// Toggles recording. When starting, `region` chooses whole-screen vs. a
     /// dragged region. `onStateChange(true/false)` reports start/stop.
-    func toggle(region: Bool, onStateChange: @escaping (Bool) -> Void) {
+    func toggle(
+        region: Bool,
+        shouldPresentRegionSelection: @escaping @MainActor () -> Bool,
+        onRegionSelectionFinished: @escaping () -> Void,
+        onStateChange: @escaping (Bool) -> Void
+    ) {
         if isStoppingRecording || isFinalizingRecording || isStartingRecording || clipEditor != nil {
             NSSound.beep()
         } else if isRecording {
             stop()
         } else {
             self.onStateChange = onStateChange
-            start(region: region)
+            start(
+                region: region,
+                shouldPresentRegionSelection: shouldPresentRegionSelection,
+                onRegionSelectionFinished: onRegionSelectionFinished
+            )
         }
+    }
+
+    var canStartRecording: Bool {
+        !isRecording
+            && !isStartingRecording
+            && !isStoppingRecording
+            && !isFinalizingRecording
+            && clipEditor == nil
     }
 
     var webcamWindowNumberForScreenCaptureExclusion: Int? {
         webcam.windowNumber
     }
 
-    private func start(region: Bool) {
+    private func start(
+        region: Bool,
+        shouldPresentRegionSelection: @escaping @MainActor () -> Bool,
+        onRegionSelectionFinished: @escaping () -> Void
+    ) {
         guard ScreenRecordingPrompt.ensureGranted(permissionService) else {
+            if region {
+                onRegionSelectionFinished()
+            }
             return
         }
         guard let display = displayManager.activeDisplay() else {
             NSSound.beep()
+            if region {
+                onRegionSelectionFinished()
+            }
             return
         }
 
         isStartingRecording = true
 
         if region {
-            selectRegion(on: display) { [weak self] rect in
+            selectRegion(
+                on: display,
+                shouldPresent: shouldPresentRegionSelection
+            ) { [weak self] rect in
                 guard let self else { return }
+                onRegionSelectionFinished()
                 guard let rect else {
                     self.isStartingRecording = false
                     return
@@ -783,6 +828,20 @@ final class RecordingController {
 
     private func fullDisplaySourceRect(for display: DisplayDescriptor) -> CGRect {
         CGRect(origin: .zero, size: display.frame.size)
+    }
+
+    static func outputPixelSize(
+        display: DisplayDescriptor,
+        sourceRect: CGRect?
+    ) -> CGSize {
+        let source = sourceRect ?? CGRect(
+            origin: .zero,
+            size: display.frame.size
+        )
+        return CGSize(
+            width: max(1, Int(source.width * display.scaleFactor)),
+            height: max(1, Int(source.height * display.scaleFactor))
+        )
     }
 
     private func beginCapture(display: DisplayDescriptor, sourceRect: CGRect?) {
@@ -869,17 +928,15 @@ final class RecordingController {
         // is kept out of the recording via its window's `sharingType = .none`.
         let filter = SCContentFilter(display: scDisplay, excludingWindows: [])
 
-        let scale = display.scaleFactor
         let configuration = SCStreamConfiguration()
-        let pixelWidth: Int
-        let pixelHeight: Int
+        let outputPixelSize = Self.outputPixelSize(
+            display: display,
+            sourceRect: sourceRect
+        )
+        let pixelWidth = Int(outputPixelSize.width)
+        let pixelHeight = Int(outputPixelSize.height)
         if let sourceRect {
             configuration.sourceRect = sourceRect
-            pixelWidth = Int(sourceRect.width * scale)
-            pixelHeight = Int(sourceRect.height * scale)
-        } else {
-            pixelWidth = Int(display.frame.width * scale)
-            pixelHeight = Int(display.frame.height * scale)
         }
         configuration.width = pixelWidth
         configuration.height = pixelHeight
@@ -915,7 +972,13 @@ final class RecordingController {
         let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
         let output = RecordingStreamOutput(engine: engine, overlayFrameProvider: overlayFrameProvider.map { provider in
             { @MainActor @Sendable in
-                guard let overlayImage = provider(sourceRect) else { return nil }
+                guard let overlayImage = provider(
+                    display.id,
+                    sourceRect,
+                    outputPixelSize
+                ) else {
+                    return nil
+                }
                 guard let webcamFrame = self.webcam.recordingSnapshot() else { return overlayImage }
                 return self.composite(webcamFrame, over: overlayImage, display: display, sourceRect: sourceRect)
             }
@@ -951,19 +1014,26 @@ final class RecordingController {
         context.interpolationQuality = .high
         context.draw(overlayImage, in: CGRect(x: 0, y: 0, width: width, height: height))
 
-        let scale = CGFloat(width) / (sourceRect?.width ?? display.frame.width)
         let source = sourceRect ?? CGRect(origin: .zero, size: display.frame.size)
+        let scaleX = CGFloat(width) / source.width
+        let scaleY = CGFloat(height) / source.height
         let frame = webcamFrame.frame
-        let x = (frame.minX - display.frame.minX - source.minX) * scale
-        let topY = (display.frame.maxY - frame.maxY - source.minY) * scale
-        let webcamWidth = frame.width * scale
-        let webcamHeight = frame.height * scale
+        let x = (frame.minX - display.frame.minX - source.minX) * scaleX
+        let topY = (display.frame.maxY - frame.maxY - source.minY) * scaleY
+        let webcamWidth = frame.width * scaleX
+        let webcamHeight = frame.height * scaleY
         let drawRect = CGRect(x: x, y: CGFloat(height) - topY - webcamHeight, width: webcamWidth, height: webcamHeight).integral
         guard drawRect.intersects(CGRect(x: 0, y: 0, width: width, height: height)) else { return overlayImage }
 
         context.saveGState()
         let clipped = drawRect.intersection(CGRect(x: 0, y: 0, width: width, height: height))
-        let path = CGPath(roundedRect: clipped, cornerWidth: webcamFrame.cornerRadius * scale, cornerHeight: webcamFrame.cornerRadius * scale, transform: nil)
+        let cornerRadius = webcamFrame.cornerRadius * min(scaleX, scaleY)
+        let path = CGPath(
+            roundedRect: clipped,
+            cornerWidth: cornerRadius,
+            cornerHeight: cornerRadius,
+            transform: nil
+        )
         context.addPath(path)
         context.clip()
 
@@ -1025,7 +1095,14 @@ final class RecordingController {
             await streamOutput?.waitForPendingOverlayFrame()
             streamOutput?.appendFinalOverlayFrameIfNeeded(presentationTime: CMClockGetTime(CMClockGetHostTimeClock()))
             if let recordingDisplay,
-               let image = try? await self.captureFallbackFrame(display: recordingDisplay, sourceRect: recordingSourceRect) {
+               let image = try? await self.captureFallbackFrame(
+                   display: recordingDisplay,
+                   sourceRect: recordingSourceRect,
+                   outputPixelSize: Self.outputPixelSize(
+                       display: recordingDisplay,
+                       sourceRect: recordingSourceRect
+                   )
+               ) {
                 engine?.appendVideoImageAtEnd(RecordingImageFrame(image: image, presentationTime: CMClockGetTime(CMClockGetHostTimeClock())))
             }
             engine?.appendBlackVideoFrameIfNeeded(presentationTime: CMClockGetTime(CMClockGetHostTimeClock()))
@@ -1048,17 +1125,39 @@ final class RecordingController {
         }
     }
 
-    private func captureFallbackFrame(display: DisplayDescriptor, sourceRect: CGRect?) async throws -> CGImage {
+    private func captureFallbackFrame(
+        display: DisplayDescriptor,
+        sourceRect: CGRect?,
+        outputPixelSize: CGSize
+    ) async throws -> CGImage {
+        if let overlayImage = overlayFrameProvider?(
+            display.id,
+            sourceRect,
+            outputPixelSize
+        ) {
+            guard let webcamFrame = webcam.recordingSnapshot() else {
+                return overlayImage
+            }
+            return composite(
+                webcamFrame,
+                over: overlayImage,
+                display: display,
+                sourceRect: sourceRect
+            )
+        }
+
         let frame = try await captureService.captureDisplay(display)
-        guard let sourceRect else { return frame.image }
-        let scale = display.scaleFactor
-        let pixelRect = CGRect(
-            x: sourceRect.minX * scale,
-            y: sourceRect.minY * scale,
-            width: sourceRect.width * scale,
-            height: sourceRect.height * scale
-        ).integral
-        return frame.image.cropping(to: pixelRect) ?? frame.image
+        let source = sourceRect ?? CGRect(
+            origin: .zero,
+            size: display.frame.size
+        )
+        return CaptureAccessoryCompositor.compose(
+            baseImage: frame.image,
+            displayFrame: display.frame,
+            sourceRegion: source,
+            outputPixelSize: outputPixelSize,
+            accessories: []
+        ) ?? frame.image
     }
 
     private func presentSave(tempURL: URL) {
@@ -1186,10 +1285,18 @@ final class RecordingController {
         }
     }
 
-    private func selectRegion(on display: DisplayDescriptor, completion: @escaping (CGRect?) -> Void) {
+    private func selectRegion(
+        on display: DisplayDescriptor,
+        shouldPresent: @escaping @MainActor () -> Bool,
+        completion: @escaping (CGRect?) -> Void
+    ) {
         Task { @MainActor in
             do {
                 let frame = try await captureService.captureDisplay(display)
+                guard shouldPresent() else {
+                    completion(nil)
+                    return
+                }
                 let window = SnipWindow(
                     contentRect: frame.display.frame,
                     styleMask: [.borderless],

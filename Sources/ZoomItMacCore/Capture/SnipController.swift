@@ -43,6 +43,13 @@ final class CrosshairCursorLease {
         }
     }
 
+    deinit {
+        while pushCount > 0 {
+            NSCursor.pop()
+            pushCount -= 1
+        }
+    }
+
     private func pushIfActive() {
         guard active, window != nil else { return }
         NSCursor.crosshair.push()
@@ -230,11 +237,20 @@ final class SnipController {
     /// selected directly; otherwise the active display is captured.
     /// `onFinished` is always called once, when the selection completes or is
     /// cancelled.
-    func begin(action: SnipAction, frame providedFrame: CapturedFrame? = nil, onFinished: @escaping () -> Void) {
+    func begin(
+        action: SnipAction,
+        frame providedFrame: CapturedFrame? = nil,
+        shouldPresent: @escaping @MainActor () -> Bool,
+        onFinished: @escaping () -> Void
+    ) {
         self.action = action
         self.onFinished = onFinished
 
         if let providedFrame {
+            guard shouldPresent() else {
+                finish()
+                return
+            }
             show(frame: providedFrame)
             return
         }
@@ -252,9 +268,15 @@ final class SnipController {
         Task { @MainActor in
             do {
                 let frame = try await captureService.captureDisplay(display)
+                guard shouldPresent() else {
+                    self.finish()
+                    return
+                }
                 self.show(frame: frame)
             } catch {
-                NSSound.beep()
+                if shouldPresent() {
+                    NSSound.beep()
+                }
                 self.finish()
             }
         }

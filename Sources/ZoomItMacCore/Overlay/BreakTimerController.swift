@@ -99,7 +99,12 @@ final class BreakTimerController {
 
     var isActive: Bool { window != nil }
 
-    func begin(settings: AppSettings, onFinished: @escaping () -> Void) async throws {
+    func begin(
+        settings: AppSettings,
+        shouldPresent: @escaping @MainActor () -> Bool,
+        onFinished: @escaping () -> Void
+    ) async throws -> Bool {
+        guard shouldPresent() else { return false }
         close(notify: false)
 
         guard let display = displayManager.activeDisplay() else {
@@ -107,6 +112,8 @@ final class BreakTimerController {
         }
 
         let backgroundImage = try await makeBackgroundImage(settings: settings, display: display)
+        guard shouldPresent() else { return false }
+
         let window = BreakTimerWindow(
             contentRect: display.frame,
             styleMask: [.borderless],
@@ -145,6 +152,7 @@ final class BreakTimerController {
         self.onFinished = onFinished
         idleSleepAssertion.begin(reason: "ZoomIt break timer")
         timerView.start()
+        return true
     }
 
     func close() {
@@ -332,7 +340,7 @@ private final class BreakTimerView: NSView {
             playedSoundAtZero = true
             if !settings.breakSoundFile.isEmpty {
                 do {
-                    try userSelectedResourceAccess.withAccess(
+                    _ = try userSelectedResourceAccess.withAccess(
                         to: .breakSound,
                         legacyPath: settings.breakSoundFile
                     ) { url in

@@ -29,7 +29,8 @@ brew uninstall --cask zoomit
 - Static zoom over a frozen ScreenCaptureKit display capture.
 - Live zoom of the running screen, with click-through interaction when not drawing.
 - Draw-without-zoom mode for annotating the screen at 1x.
-- Pen, line, rectangle, ellipse, arrow, highlighter, undo, erase, blank-screen sketch pads, and typing annotations.
+- Pen, line, rectangle, diamond, ellipse, arrow, highlighter, undo, erase, blank-screen sketch pads, and typing annotations.
+- Excalidraw-style Architect, Artist, and Cartoonist sloppiness for shapes, arrows, and Pen strokes; regular Lines stay precise.
 - Viewport screenshot copy/save and region snip copy/save.
 - OCR snip: select a screen region and copy its recognized text to the clipboard.
 - Break timer with a configurable countdown, colors, opacity, background, and optional sound.
@@ -54,7 +55,9 @@ swift run ZoomItMacSelfTest
 swift run ZoomIt
 ```
 
-The self-test covers viewport math, annotation lifecycle/rendering, settings persistence, and panorama stitcher regressions.
+The self-test covers viewport math, annotation lifecycle/rendering, settings persistence, and panorama stitcher regressions. UI tests require an unlocked macOS desktop.
+
+For drawing and dragging performance diagnostics, run `swift run -c release ZoomItMacSelfTest --bench-drawing`.
 
 Run the sandbox product-surface tests with the App Store compiler condition:
 
@@ -87,15 +90,46 @@ The contributor build is named `ZoomIt (Dev).app` (bundle id `com.sysinternals.z
 | Panorama to clipboard | `Control+8` |
 | Panorama to file | `Control+Shift+8` |
 
-All global hotkeys are configurable in Settings. While zoomed, use `Option+Up` and `Option+Down` to change zoom level, mouse wheel to zoom or resize tools depending on mode, `Command+S` / `Command+C` to save or copy the viewport, and `Esc` or right click to exit the active overlay mode.
+All global hotkeys are configurable in Settings. While zoomed, use `Option+Up` and `Option+Down` to change zoom level, mouse wheel to zoom or resize tools depending on mode, and `Command+S` / `Command+C` to save or copy the viewport. `Esc` exits the active overlay mode; right-click only leaves drawing mode and does not close an overlay when drawing is inactive.
 
 ## Drawing And Typing
 
-- Left click enters drawing mode; drag to draw.
-- Hold `Shift` for a line, `Control` for a rectangle, `Control+Shift` for an arrow, or `Tab` for an ellipse.
-- Press `R/G/B/O/Y/P/W/K` for red, green, blue, orange, yellow, pink, white, or black; hold `Shift` with a color for highlighter ink.
-- Press `T` for typing mode, `Shift+T` for right-aligned typing, and `Up` / `Down` or the mouse wheel to adjust font size.
-- Use `Command+Z` to undo and `E` to erase annotations.
+Press `Control+2` to draw without zoom, or start drawing while static or live
+zoom is active. The drawing toolbar includes the main tools and actions, with
+attached controls for the active tool or selection; dragging the toolbar moves
+the controls with it.
+
+| Shortcut | Action |
+| --- | --- |
+| `1` / `2` / `3` / `4` | Select / Rectangle / Diamond / Ellipse |
+| `5` / `6` / `7` / `8` / `0` | Arrow / Line / Pen / Text / Eraser |
+| `Space` / `H` | Hand / Highlighter |
+| Hold `Shift` / `Control` / `Control+Shift` / `Tab` while dragging | Temporarily draw a line / rectangle / arrow / ellipse |
+| `R/G/B/O/Y/P/W/K`; add `Shift` | Set ink color / translucent ink |
+| `[` / `]`, `Shift+Up` / `Shift+Down`, or mouse wheel | Change stroke width |
+| `Command+Z` or `Control+Z` / `Command+Shift+Z` / `E` | Undo / Redo / Clear |
+| `T` / `Shift+T`; `Up` / `Down` or mouse wheel | Start left/right-aligned typing; change font size |
+
+When Rectangle or Diamond is selected, `Shift` constrains the shape instead of
+temporarily switching to Line.
+
+### Editing
+
+Use Select to click or marquee-select annotations, then drag to move them or use
+the handles to resize and rotate. For a selected line or arrow, `Return` toggles
+point editing, `I` inserts a point, and `Delete` removes selected points. The
+attached controls set straight or curved routes, endpoint heads, and head size.
+Dragging an endpoint near a rectangle, diamond, or ellipse binds it to that
+shape; `Option`-drag or `Command+Option+B` unbinds it.
+
+### Highlighter And Smart Draw
+
+Highlighter uses translucent marker ink. Smart Draw is optional, off by default,
+and applies only to Pen strokes: recognized circles, ellipses, rectangles,
+diamonds, and arrows become clean shapes, while other strokes remain freehand.
+
+Visible drawing controls are included in full-viewport exports and recordings;
+controls hidden during region selection are not.
 
 ## Snip And OCR
 
@@ -171,7 +205,7 @@ The App Store variant uses security-scoped bookmarks for the selected break
 sound, break background, and automatic snip folder. Re-select a resource in
 Settings if macOS reports that its authorization can no longer be restored.
 Screen recording remains controlled by macOS privacy consent and has no app
-entitlement. 
+entitlement.
 
 By default this produces `.build/ZoomIt (Dev).app` with the app icon, bundled resources, and an `Info.plist` declaring the microphone and camera usage descriptions. `release` builds are **Universal** (Apple Silicon + Intel) by default; `debug` builds are native to the build machine for speed. Override the architectures with `ZOOMIT_ARCHS` (e.g. `ZOOMIT_ARCHS=arm64`). A Universal build routes through Xcode's build system, so it requires a **full Xcode** install — with only the Command Line Tools the script warns and falls back to a native build. The build summary prints the resulting architectures.
 

@@ -93,6 +93,11 @@ final class DemoMirrorController {
     /// True while a region drag-selection is in progress (before mirroring
     /// actually starts), so a second hotkey press cancels it.
     private var isSelecting = false
+    private var isStarting = false
+    private var activationGeneration = 0
+    private var activationIsCurrent: (() -> Bool)?
+    private var onRegionSelectionFinished: (() -> Void)?
+    private var onActivationFinished: (() -> Void)?
 
     private var stream: SCStream?
     private var streamOutput: DemoMirrorStreamOutput?
@@ -129,21 +134,42 @@ final class DemoMirrorController {
     /// Toggles DemoMirror. If mirroring is active, or a region selection is in
     /// progress, any of the three hotkey variants stops it (matching "enter the
     /// hotkey again to stop mirroring"). Otherwise begins mirroring per `scope`.
-    func toggle(scope: DemoMirrorScope) {
-        if isActive || isSelecting {
+    func toggle(
+        scope: DemoMirrorScope,
+        activationIsCurrent: @escaping () -> Bool,
+        onRegionSelectionFinished: @escaping () -> Void,
+        onActivationFinished: @escaping () -> Void
+    ) {
+        if isActive || isSelecting || isStarting {
             stop()
+            onRegionSelectionFinished()
+            onActivationFinished()
             return
         }
 
-        guard ScreenRecordingPrompt.ensureGranted(permissionService) else { return }
+        activationGeneration += 1
+        let generation = activationGeneration
+        isStarting = true
+        self.activationIsCurrent = activationIsCurrent
+        self.onRegionSelectionFinished = scope == .region
+            ? onRegionSelectionFinished
+            : nil
+        self.onActivationFinished = onActivationFinished
+
+        guard ScreenRecordingPrompt.ensureGranted(permissionService) else {
+            finishActivation(generation: generation)
+            return
+        }
 
         let displays = displayManager.displays()
         guard let source = displayManager.activeDisplay() else {
             NSSound.beep()
+            finishActivation(generation: generation)
             return
         }
         guard let target = displays.first(where: { $0.id != source.id }) else {
             presentAlert("Screen mirroring requires a second display.")
+            finishActivation(generation: generation)
             return
         }
 
@@ -152,17 +178,40 @@ final class DemoMirrorController {
 
         switch scope {
         case .screen:
-            Task { await beginMirroring(source: source, target: target, region: nil, window: nil) }
+            Task {
+                await beginMirroring(
+                    source: source,
+                    target: target,
+                    region: nil,
+                    window: nil,
+                    generation: generation
+                )
+            }
         case .region:
-            beginRegionSelection(source: source, target: target)
+            beginRegionSelection(
+                source: source,
+                target: target,
+                generation: generation
+            )
         case .window:
-            Task { await beginWindowSelection(source: source, target: target) }
+            Task {
+                await beginWindowSelection(
+                    source: source,
+                    target: target,
+                    generation: generation
+                )
+            }
         }
     }
 
     func stop() {
+        activationGeneration += 1
         isSelecting = false
+        isStarting = false
         isActive = false
+        activationIsCurrent = nil
+        let activationCompletion = onActivationFinished
+        onActivationFinished = nil
         trackingTimer?.invalidate()
         trackingTimer = nil
         trackedWindowID = nil
@@ -178,6 +227,7 @@ final class DemoMirrorController {
         cursorLease = nil
         selectionWindow?.orderOut(nil)
         selectionWindow = nil
+        finishRegionSelection()
         borderWindow?.orderOut(nil)
         borderWindow = nil
         mirrorWindow?.orderOut(nil)
@@ -192,16 +242,21 @@ final class DemoMirrorController {
         if let activeStream {
             Task { try? await activeStream.stopCapture() }
         }
+        activationCompletion?()
     }
 
     // MARK: - Region selection (Shift variant)
 
-    private func beginRegionSelection(source: DisplayDescriptor, target: DisplayDescriptor) {
+    private func beginRegionSelection(
+        source: DisplayDescriptor,
+        target: DisplayDescriptor,
+        generation: Int
+    ) {
         isSelecting = true
         Task { @MainActor in
             guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
                   let scDisplay = content.displays.first(where: { $0.displayID == source.id }) else {
-                isSelecting = false
+                finishActivation(generation: generation)
                 return
             }
             let filter = SCContentFilter(display: scDisplay, excludingWindows: [])
@@ -211,14 +266,33 @@ final class DemoMirrorController {
             configuration.height = Int(source.frame.height * scale)
             configuration.showsCursor = false
             guard let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) else {
-                isSelecting = false
+                finishActivation(generation: generation)
                 return
             }
-            showRegionSelector(image: image, source: source, target: target)
+            guard ownsActivation(generation: generation) else {
+                finishActivation(generation: generation)
+                return
+            }
+            showRegionSelector(
+                image: image,
+                source: source,
+                target: target,
+                generation: generation
+            )
         }
     }
 
-    private func showRegionSelector(image: CGImage, source: DisplayDescriptor, target: DisplayDescriptor) {
+    private func showRegionSelector(
+        image: CGImage,
+        source: DisplayDescriptor,
+        target: DisplayDescriptor,
+        generation: Int
+    ) {
+        guard ownsActivation(generation: generation) else {
+            finishActivation(generation: generation)
+            return
+        }
+
         let window = SnipWindow(
             contentRect: source.frame,
             styleMask: [.borderless],
@@ -237,7 +311,12 @@ final class DemoMirrorController {
             borderColor: NSColor(red: 0, green: 1, blue: 0, alpha: 1)
         )
         view.onComplete = { [weak self] rect in
-            self?.finishRegionSelection(rect, source: source, target: target)
+            self?.finishRegionSelection(
+                rect,
+                source: source,
+                target: target,
+                generation: generation
+            )
         }
         window.contentView = view
         window.makeKeyAndOrderFront(nil)
@@ -249,26 +328,59 @@ final class DemoMirrorController {
         selectionWindow = window
     }
 
-    private func finishRegionSelection(_ rect: CGRect?, source: DisplayDescriptor, target: DisplayDescriptor) {
+    private func finishRegionSelection(
+        _ rect: CGRect?,
+        source: DisplayDescriptor,
+        target: DisplayDescriptor,
+        generation: Int
+    ) {
+        guard generation == activationGeneration else { return }
+
         cursorLease?.invalidate()
         cursorLease = nil
         selectionWindow?.orderOut(nil)
         selectionWindow = nil
         isSelecting = false
+        finishRegionSelection()
 
-        guard let rect else { return }
-        Task { await beginMirroring(source: source, target: target, region: rect, window: nil) }
+        guard let rect, ownsActivation(generation: generation) else {
+            finishActivation(generation: generation)
+            return
+        }
+        Task {
+            await beginMirroring(
+                source: source,
+                target: target,
+                region: rect,
+                window: nil,
+                generation: generation
+            )
+        }
     }
 
     // MARK: - Window selection (Option variant)
 
-    private func beginWindowSelection(source: DisplayDescriptor, target: DisplayDescriptor) async {
+    private func beginWindowSelection(
+        source: DisplayDescriptor,
+        target: DisplayDescriptor,
+        generation: Int
+    ) async {
         guard let window = await windowUnderCursor() else {
-            NSSound.beep()
+            if ownsActivation(generation: generation) {
+                NSSound.beep()
+                finishActivation(generation: generation)
+            }
             return
         }
+        guard ownsActivation(generation: generation) else { return }
         trackedWindowID = window.windowID
-        await beginMirroring(source: source, target: target, region: nil, window: window)
+        await beginMirroring(
+            source: source,
+            target: target,
+            region: nil,
+            window: window,
+            generation: generation
+        )
     }
 
     /// Finds the frontmost on-screen window (excluding ZoomIt's own windows and
@@ -310,10 +422,20 @@ final class DemoMirrorController {
 
     // MARK: - Mirroring
 
-    private func beginMirroring(source: DisplayDescriptor, target: DisplayDescriptor, region: CGRect?, window: SCWindow?) async {
+    private func beginMirroring(
+        source: DisplayDescriptor,
+        target: DisplayDescriptor,
+        region: CGRect?,
+        window: SCWindow?,
+        generation: Int
+    ) async {
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
               let scDisplay = content.displays.first(where: { $0.displayID == source.id }) else {
-            stop()
+            finishActivation(generation: generation)
+            return
+        }
+        guard ownsActivation(generation: generation) else {
+            finishActivation(generation: generation)
             return
         }
 
@@ -363,13 +485,21 @@ final class DemoMirrorController {
 
         let newStream = SCStream(filter: filter, configuration: configuration, delegate: nil)
         let output = DemoMirrorStreamOutput { [weak self] image in
-            self?.mirrorImageView?.image = image
+            guard let self, self.activationGeneration == generation else {
+                return
+            }
+            self.mirrorImageView?.image = image
         }
         do {
             try newStream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sampleQueue)
             try await newStream.startCapture()
         } catch {
-            stop()
+            finishActivation(generation: generation)
+            return
+        }
+        guard ownsActivation(generation: generation) else {
+            try? await newStream.stopCapture()
+            finishActivation(generation: generation)
             return
         }
 
@@ -387,6 +517,34 @@ final class DemoMirrorController {
         if window != nil {
             startTrackingTimer(source: source)
         }
+        finishActivation(generation: generation)
+    }
+
+    private func ownsActivation(generation: Int) -> Bool {
+        activationGeneration == generation
+            && activationIsCurrent?() == true
+    }
+
+    private func finishActivation(generation: Int) {
+        guard activationGeneration == generation else { return }
+        isSelecting = false
+        isStarting = false
+        activationIsCurrent = nil
+        finishRegionSelection()
+        if !isActive {
+            trackedWindowID = nil
+            sourceDisplay = nil
+            targetDisplay = nil
+        }
+        let completion = onActivationFinished
+        onActivationFinished = nil
+        completion?()
+    }
+
+    private func finishRegionSelection() {
+        let completion = onRegionSelectionFinished
+        onRegionSelectionFinished = nil
+        completion?()
     }
 
     private func showBackdrop(target: DisplayDescriptor) {
