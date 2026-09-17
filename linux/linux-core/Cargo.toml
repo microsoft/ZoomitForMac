@@ -1,0 +1,9 @@
+[package]
+name = "zoomit-core"
+version = "0.1.0"
+edition = "2021"
+description = "Platform-agnostic core for ZoomIt-style tools (modes + annotations)"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
