@@ -95,6 +95,7 @@ All global hotkeys are configurable in Settings. While zoomed, use `Option+Up` a
 - Hold `Shift` for a line, `Control` for a rectangle, `Control+Shift` for an arrow, or `Tab` for an ellipse.
 - Press `R/G/B/O/Y/P/W/K` for red, green, blue, orange, yellow, pink, white, or black; hold `Shift` with a color for highlighter ink.
 - Press `T` for typing mode, `Shift+T` for right-aligned typing, and `Up` / `Down` or the mouse wheel to adjust font size.
+- Typing mode works with input methods that compose (Chinese, Japanese, Korean), and `Command+V` pastes clipboard text.
 - Use `Command+Z` to undo and `E` to erase annotations.
 
 ## Snip And OCR

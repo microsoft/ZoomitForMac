@@ -38,6 +38,9 @@ public enum SelfTestRunner {
         try testShapeAnnotationEndpointReplacement()
         try testUndoAndClear()
         try testTypingAnnotations()
+        try testMarkedTextComposition()
+        try testPastedTextLineEndings()
+        try testShortcutKeysDoNotTypeText()
         try testAnnotationRenderingTouchesPixels()
         try testSettingsRoundTrip()
         try testFirstLaunchFlag()
@@ -231,6 +234,77 @@ public enum SelfTestRunner {
         controller.deleteBackward()
 
         try expect(controller.annotationSnapshot[0].text == "H", "Expected deleteBackward to remove one character")
+    }
+
+    /// Input-method composition: the preedit lives in the text annotation, is
+    /// replaced (not appended to) as it grows, and disappears when the IME
+    /// commits or cancels.
+    private static func testMarkedTextComposition() throws {
+        let controller = AnnotationController()
+        controller.setInsertionPoint(CGPoint(x: 20, y: 30))
+
+        controller.insertText("A")
+        controller.setMarkedText("ㄓ")
+        try expect(controller.annotationSnapshot[0].text == "Aㄓ", "Expected the preedit to show after the committed text")
+        controller.setMarkedText("ㄓㄨˋ")
+        try expect(controller.annotationSnapshot[0].text == "Aㄓㄨˋ", "Expected an updated preedit to replace the previous one")
+        try expect(controller.hasMarkedText, "Expected composition to be in progress")
+        // The ranges NSTextInputClient reports are derived from the preedit
+        // being the tail of the text being typed.
+        try expect(controller.typingText == "Aㄓㄨˋ", "Expected typingText to include the preedit")
+        try expect(controller.typingText.hasSuffix(controller.markedText),
+                   "Expected the preedit to be the suffix of the text being typed")
+
+        controller.confirmMarkedText("注")
+        try expect(controller.annotationSnapshot[0].text == "A注", "Expected the committed character to replace the preedit")
+        try expect(!controller.hasMarkedText, "Expected composition to end after committing")
+
+        // Same path for the other composing input methods: Korean rebuilds one
+        // syllable in place, Japanese grows a clause before converting it.
+        controller.setMarkedText("ㅎ")
+        controller.setMarkedText("하")
+        controller.setMarkedText("한")
+        try expect(controller.annotationSnapshot[0].text == "A注한", "Expected Hangul composition to rebuild in place")
+        controller.confirmMarkedText("한")
+        controller.setMarkedText("にほん")
+        controller.setMarkedText("日本")
+        controller.confirmMarkedText("日本")
+        try expect(controller.annotationSnapshot[0].text == "A注한日本", "Expected kana-to-kanji conversion to replace the preedit")
+
+        // Finalizing without a separate commit (unmarkText) keeps what is on
+        // screen; only cancelling takes it away.
+        controller.setMarkedText("字")
+        controller.acceptMarkedText()
+        try expect(controller.annotationSnapshot[0].text == "A注한日本字", "Expected an accepted composition to stay in the annotation")
+        try expect(!controller.hasMarkedText, "Expected accepting to end the composition")
+
+        // A composition that created the annotation must take it away again.
+        let cancelled = AnnotationController()
+        cancelled.setInsertionPoint(CGPoint(x: 20, y: 30))
+        cancelled.setMarkedText("ㄧ")
+        try expect(cancelled.annotationSnapshot.count == 1, "Expected the preedit to create a text annotation")
+        cancelled.clearMarkedText()
+        try expect(cancelled.annotationSnapshot.isEmpty, "Expected a cancelled composition to remove the empty text annotation")
+    }
+
+    /// Pasted text keeps a single line-ending convention so the typing caret,
+    /// which counts "\n", lands where the text is actually drawn.
+    private static func testPastedTextLineEndings() throws {
+        try expect(ZoomCanvasView.normalizedPasteText("一\r\n二\r三") == "一\n二\n三",
+                   "Expected CRLF and CR line endings to normalize to LF")
+        try expect(ZoomCanvasView.normalizedPasteText("中文") == "中文",
+                   "Expected text without line breaks to paste unchanged")
+    }
+
+    /// Keys held with Command or Control are shortcuts, so an unhandled one
+    /// must not be typed into the annotation.
+    private static func testShortcutKeysDoNotTypeText() throws {
+        try expect(ZoomCanvasView.typesAsText(modifiers: []), "Expected a plain key to type")
+        try expect(ZoomCanvasView.typesAsText(modifiers: [.shift]), "Expected Shift to type")
+        try expect(ZoomCanvasView.typesAsText(modifiers: [.option]),
+                   "Expected Option to type, since it produces real characters")
+        try expect(!ZoomCanvasView.typesAsText(modifiers: [.command]), "Expected Command to be a shortcut")
+        try expect(!ZoomCanvasView.typesAsText(modifiers: [.control]), "Expected Control to be a shortcut")
     }
 
     private static func testAnnotationRenderingTouchesPixels() throws {

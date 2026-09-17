@@ -50,6 +50,7 @@ final class ZoomCanvasView: NSView {
         didSet {
             let leftTypingMode = oldValue == .typing && interactionMode != .typing
             if leftTypingMode {
+                discardComposition()
                 anchorCursorAfterTyping()
             }
             switch interactionMode {
@@ -227,6 +228,7 @@ final class ZoomCanvasView: NSView {
         }
 
         if interactionMode == .typing {
+            discardComposition()
             if annotationController.isTypingLocked {
                 finishLockedTypingAtCaret(reason: "mouse down locked")
                 needsDisplay = true
@@ -293,6 +295,7 @@ final class ZoomCanvasView: NSView {
     override func rightMouseDown(with event: NSEvent) {
         pointerViewPoint = convert(event.locationInWindow, from: nil)
         if interactionMode == .typing {
+            discardComposition()
             if annotationController.isTypingLocked {
                 finishLockedTypingAtCaret(reason: "right mouse locked")
             } else {
@@ -384,6 +387,23 @@ final class ZoomCanvasView: NSView {
             }
             return
         }
+        // While an input method is composing (a Chinese IME's phonetic preedit,
+        // for example) every key belongs to the IME — including Esc, Return,
+        // Backspace and the arrows, which select candidates, page through them
+        // or cancel the composition rather than acting on the annotation.
+        if interactionMode == .typing && annotationController.hasMarkedText {
+            inputContext?.handleEvent(event)
+            needsDisplay = true
+            return
+        }
+        // ⌘V pastes clipboard text into the annotation being typed, useful for
+        // text an input method makes awkward to type on the overlay. Matched by
+        // character rather than key code so it follows the keyboard layout.
+        if interactionMode == .typing, event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "v" {
+            pasteClipboardText()
+            return
+        }
         switch event.keyCode {
         case 53:
             // Esc leaves typing mode first (matching ZoomIt). In live-zoom
@@ -434,13 +454,56 @@ final class ZoomCanvasView: NSView {
             annotationController.insertText("\n")
             needsDisplay = true
         default:
-            if interactionMode == .typing, let characters = event.characters, !characters.isEmpty {
-                annotationController.insertText(characters)
+            if interactionMode == .typing {
+                // Route through the input context so input methods can compose;
+                // plain keys come straight back through NSTextInputClient's
+                // insertText, composing ones via setMarkedText.
+                if inputContext?.handleEvent(event) != true,
+                   Self.typesAsText(modifiers: event.modifierFlags),
+                   let characters = event.characters, !characters.isEmpty {
+                    annotationController.insertText(characters)
+                }
                 needsDisplay = true
             } else {
                 handleDrawingShortcut(event) ?? interpretKeyEvents([event])
             }
         }
+    }
+
+    /// Commands an input method emits (move-left, cancel, …) have no meaning on
+    /// an annotation canvas; swallowing them in typing mode avoids the beep.
+    /// Other modes keep the standard responder behaviour.
+    override func doCommand(by selector: Selector) {
+        guard interactionMode == .typing else {
+            super.doCommand(by: selector)
+            return
+        }
+    }
+
+    /// Whether an unhandled key event should be typed into the annotation.
+    /// Command and Control mean the key is a shortcut, so an unrecognized one
+    /// like ⌘A does nothing instead of typing "a", and Control combinations do
+    /// not put their control character on screen. Option is left alone because
+    /// it produces real characters.
+    static func typesAsText(modifiers: NSEvent.ModifierFlags) -> Bool {
+        !modifiers.contains(.command) && !modifiers.contains(.control)
+    }
+
+    private func pasteClipboardText() {
+        guard let clipboard = NSPasteboard.general.string(forType: .string) else { return }
+        let text = Self.normalizedPasteText(clipboard)
+        guard !text.isEmpty else { return }
+        annotationController.insertText(text)
+        needsDisplay = true
+    }
+
+    /// Normalizes clipboard text for the annotation: Windows and classic Mac
+    /// line endings become "\n" so the caret math in
+    /// `AnnotationController.typingCaret()`, which counts "\n", agrees with what
+    /// the text actually draws.
+    static func normalizedPasteText(_ text: String) -> String {
+        text.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
     }
 
     private func handleDrawingShortcut(_ event: NSEvent) -> Void? {
@@ -636,6 +699,18 @@ final class ZoomCanvasView: NSView {
         }
         syncPointerViewPointFromMouse()
         latestCursorLocation = NSEvent.mouseLocation
+    }
+
+    /// Abandons any in-progress input method composition, both in the IME and
+    /// in the annotation showing its preedit.
+    private func discardComposition() {
+        guard annotationController.hasMarkedText else { return }
+        // Drop the preedit first: discardMarkedText makes the input method
+        // finalize, and its unmarkText callback accepts whatever is still
+        // marked. With the annotation already cleared there is nothing left for
+        // it to accept, so an abandoned composition never lands on screen.
+        annotationController.clearMarkedText()
+        inputContext?.discardMarkedText()
     }
 
     private func finishLockedTypingAtCaret(reason: String) {
@@ -967,5 +1042,118 @@ final class ZoomCanvasView: NSView {
         context.setFillColor(annotationController.currentStyle.color.nsColor.cgColor)
         context.fillEllipse(in: rect)
         context.restoreGState()
+    }
+}
+/// Text input plumbing so input methods that compose (Chinese, Japanese,
+/// Korean, dead keys) work in typing mode. Without it the raw keystrokes —
+/// bopomofo symbols, for instance — would be painted on screen instead of the
+/// characters the IME produces.
+///
+/// Every callback is ignored outside typing mode: `interpretKeyEvents` is still
+/// used as the fallback for unhandled keys in zoom/draw modes, and conforming to
+/// this protocol makes it route those keys here.
+extension ZoomCanvasView: @MainActor NSTextInputClient {
+    /// `replacementRange` is deliberately ignored, here and in `setMarkedText`.
+    /// Typing appends, so the composition is always the tail of the text and a
+    /// concrete range naming that composition produces the same result as
+    /// replacing the tail. A range naming already committed text would not, but
+    /// reaching one means reconverting, and this view advertises no addressable
+    /// document to reconvert from: `attributedSubstring` returns nil and
+    /// `characterIndex(for:)` returns NSNotFound. Honouring arbitrary ranges
+    /// would put the preedit in the middle of the text, which needs a real
+    /// insertion point and selection model rather than an annotation that grows
+    /// at the end.
+    func insertText(_ string: Any, replacementRange: NSRange) {
+        guard interactionMode == .typing else { return }
+        annotationController.confirmMarkedText(Self.plainString(string))
+        needsDisplay = true
+    }
+
+    /// The input method's selection within the composition is not tracked
+    /// either: `selectedRange()` reports the caret at the end of the text.
+    /// Showing an active clause would mean styling the preedit, which the
+    /// annotation render path does not do.
+    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        guard interactionMode == .typing else { return }
+        annotationController.setMarkedText(Self.plainString(string))
+        needsDisplay = true
+    }
+
+    /// An input method finalizing a composition expects the marked text to stay
+    /// as ordinary text, so this only ends the composition. Cancelling goes
+    /// through setMarkedText("") or discardComposition() instead, which do
+    /// remove it.
+    func unmarkText() {
+        guard interactionMode == .typing else { return }
+        annotationController.acceptMarkedText()
+        needsDisplay = true
+    }
+
+    func hasMarkedText() -> Bool {
+        interactionMode == .typing && annotationController.hasMarkedText
+    }
+
+    /// Both ranges are measured from the start of the text being typed, the way
+    /// NSTextInputClient defines them, and in UTF-16 units rather than
+    /// Characters so a composition containing a non-BMP character reports the
+    /// length the input method expects.
+    func markedRange() -> NSRange {
+        guard interactionMode == .typing else { return NSRange(location: NSNotFound, length: 0) }
+        let length = annotationController.markedText.utf16.count
+        guard length > 0 else { return NSRange(location: NSNotFound, length: 0) }
+        // The composition is always the tail of the text being typed.
+        let total = annotationController.typingText.utf16.count
+        return NSRange(location: max(0, total - length), length: length)
+    }
+
+    /// Typing always appends, so the caret sits at the end of the text. Leaving
+    /// typing mode does not clear the annotation being typed, so without the
+    /// guard this would keep advertising an editable selection to the text
+    /// input system in zoom and draw modes.
+    func selectedRange() -> NSRange {
+        guard interactionMode == .typing else { return NSRange(location: NSNotFound, length: 0) }
+        return NSRange(location: annotationController.typingText.utf16.count, length: 0)
+    }
+
+    /// Positions the input method's candidate window at the text caret.
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        guard interactionMode == .typing, let window,
+              let caret = annotationController.typingCaret() else {
+            actualRange?.pointee = NSRange(location: NSNotFound, length: 0)
+            return .zero
+        }
+        // The rectangle covers the caret, which sits at the end of the text.
+        actualRange?.pointee = NSRange(location: annotationController.typingText.utf16.count, length: 0)
+        let source = viewportController.sourceRect(for: bounds, cursorLocation: latestCursorLocation)
+        let top = viewPoint(forContentPoint: caret.origin, source: source)
+        let bottom = viewPoint(forContentPoint: CGPoint(x: caret.origin.x, y: caret.origin.y + caret.height), source: source)
+        let rect = NSRect(
+            x: top.x,
+            y: min(top.y, bottom.y),
+            width: 1,
+            height: max(1, abs(bottom.y - top.y))
+        )
+        return window.convertToScreen(convert(rect, to: nil))
+    }
+
+    func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+        nil
+    }
+
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] {
+        []
+    }
+
+    /// The canvas has no hit-testable text layout, so no point maps to a
+    /// character index. NSNotFound is the documented answer for that; returning
+    /// 0 would tell the input method every point is the start of the text.
+    func characterIndex(for point: NSPoint) -> Int {
+        NSNotFound
+    }
+
+    /// Input methods hand text over as either a plain or an attributed string;
+    /// the annotation only carries characters, so the styling is dropped.
+    private static func plainString(_ string: Any) -> String {
+        (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
     }
 }
