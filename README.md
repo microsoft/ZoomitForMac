@@ -117,6 +117,8 @@ Panorama capture records a selected scroll region while you scroll, then stitche
 
 Settings are saved immediately to `UserDefaults`. The app includes permission checks for Screen Recording, Microphone, and Camera. Running from SwiftPM is supported for development; launch at login and production distribution are intended for the bundled app form.
 
+On first launch, ZoomIt shows a short **Welcome & Permissions** wizard: a first page explaining why Screen Recording — the one required permission — is needed, a second page explaining that Microphone and Camera are optional, and a third page to grant Screen Recording right away. It's also reachable any time via ▸ Check Permissions ▸ Run Welcome…. In the ▸ Check Permissions dialog, each permission's status shows "Granted" in green once it's been granted.
+
 ## Distributing To Testers
 
 Testers should run the bundled app, not `swift run`. Build a release app bundle:
