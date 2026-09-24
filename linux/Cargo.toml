@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "linux-core",
+    "linux-capture",
+]
+resolver = "2"

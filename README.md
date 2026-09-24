@@ -2,6 +2,12 @@
 
 Sysinternals ZoomIt for Mac is a macOS menu-bar utility modeled after Sysinternals ZoomIt. It provides screen zoom, live zoom, drawing and typing annotations, screenshots, snips, recording, webcam picture-in-picture, and scrolling panorama capture.
 
+> **Fork note** – This repository contains additional architecture analysis and a Linux port roadmap exploring PipeWire capture and Skia-based annotation rendering. See:
+> - [ARCHITECTURE.md](ARCHITECTURE.md)
+> - [docs/LINUX_ROADMAP.md](docs/LINUX_ROADMAP.md)
+> - [docs/PIPEWIRE_INVESTIGATION.md](docs/PIPEWIRE_INVESTIGATION.md)
+> - [docs/SKIA_INVESTIGATION.md](docs/SKIA_INVESTIGATION.md)
+
 ## Install
 
 Install Sysinternals ZoomIt from the [Homebrew Sysinternals tap](https://github.com/microsoft/homebrew-sysinternalstap):

@@ -1,0 +1,20 @@
+[package]
+name = "zoomit-capture"
+version = "0.1.0"
+edition = "2021"
+description = "Screen capture backends for ZoomIt Linux (PipeWire + portal, X11 fallback)"
+license = "MIT"
+
+[dependencies]
+zoomit-core = { path = "../linux-core" }
+thiserror = "1"
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"], optional = true }
+# Optional real backends – enable with features
+ashpd = { version = "0.9", optional = true }
+# pipewire = { version = "0.8", optional = true }  # enable when integrating real PipeWire
+
+[features]
+default = []
+# Enable for real portal + PipeWire (requires libpipewire, xdg-desktop-portal at runtime)
+pipewire = ["dep:ashpd", "dep:tokio"]
