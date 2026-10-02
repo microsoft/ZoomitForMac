@@ -5,6 +5,9 @@ struct AppSettings: Equatable {
     var maximumZoomFactor: CGFloat
     var minimumZoomFactor: CGFloat
     var rootPenWidth: CGFloat
+    /// Last drawing pen color, restored at the start of each drawing session so
+    /// it matches Windows ZoomIt (issue #57).
+    var lastPenColor: AnnotationColor
     var animateZoom: Bool
     var smoothImage: Bool
     /// The user's desired launch-at-login state. The actual macOS login item
@@ -122,6 +125,7 @@ struct AppSettings: Equatable {
         maximumZoomFactor: 32,
         minimumZoomFactor: 1,
         rootPenWidth: 5,
+        lastPenColor: .red,
         animateZoom: true,
         smoothImage: true,
         launchAtLogin: false,
@@ -205,6 +209,7 @@ final class UserDefaultsSettingsStore: SettingsStore {
         static let maximumZoomFactor = "maximumZoomFactor"
         static let minimumZoomFactor = "minimumZoomFactor"
         static let rootPenWidth = "rootPenWidth"
+        static let lastPenColor = "lastPenColor"
         static let animateZoom = "animateZoom"
         static let smoothImage = "smoothImage"
         static let launchAtLogin = "launchAtLogin"
@@ -313,6 +318,11 @@ final class UserDefaultsSettingsStore: SettingsStore {
 
         if defaults.object(forKey: Key.rootPenWidth) != nil {
             settings.rootPenWidth = defaults.double(forKey: Key.rootPenWidth)
+        }
+
+        if let colorName = defaults.string(forKey: Key.lastPenColor),
+           let color = AnnotationColor(rawValue: colorName) {
+            settings.lastPenColor = color
         }
 
         if defaults.object(forKey: Key.animateZoom) != nil {
@@ -531,6 +541,7 @@ final class UserDefaultsSettingsStore: SettingsStore {
         defaults.set(settings.maximumZoomFactor, forKey: Key.maximumZoomFactor)
         defaults.set(settings.minimumZoomFactor, forKey: Key.minimumZoomFactor)
         defaults.set(settings.rootPenWidth, forKey: Key.rootPenWidth)
+        defaults.set(settings.lastPenColor.rawValue, forKey: Key.lastPenColor)
         defaults.set(settings.animateZoom, forKey: Key.animateZoom)
         defaults.set(settings.smoothImage, forKey: Key.smoothImage)
         defaults.set(settings.launchAtLogin, forKey: Key.launchAtLogin)
