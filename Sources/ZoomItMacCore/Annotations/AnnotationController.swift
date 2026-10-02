@@ -17,6 +17,12 @@ final class AnnotationController {
     private var inProgress: Annotation?
     private var textAnnotationIndex: Int?
     private var insertionPoint: CGPoint = CGPoint(x: 120, y: 120)
+    /// Trailing text in the active text annotation that an input method is
+    /// still composing (a Chinese IME's phonetic preedit, a Japanese clause
+    /// awaiting conversion). Keeping the preedit inside the annotation means it
+    /// renders, advances the caret and honours the font/justification like any
+    /// other text; it is replaced or removed as composition proceeds.
+    private(set) var markedText = ""
 
     var annotationSnapshot: [Annotation] {
         annotations
@@ -44,11 +50,13 @@ final class AnnotationController {
         currentStyle = .default
         typingFontSize = AnnotationController.defaultFontSize
         typingRightAligned = false
+        markedText = ""
     }
 
     func setInsertionPoint(_ point: CGPoint) {
         insertionPoint = point
         textAnnotationIndex = nil
+        markedText = ""
     }
 
     /// Starts a fresh typing session, matching ZoomIt's behaviour when entering
@@ -56,6 +64,7 @@ final class AnnotationController {
     func beginTypingSession(rightAligned: Bool) {
         typingRightAligned = rightAligned
         textAnnotationIndex = nil
+        markedText = ""
     }
 
     func increaseFontSize() {
@@ -145,12 +154,14 @@ final class AnnotationController {
     func undo() {
         _ = annotations.popLast()
         textAnnotationIndex = nil
+        markedText = ""
     }
 
     func clear() {
         annotations.removeAll()
         inProgress = nil
         textAnnotationIndex = nil
+        markedText = ""
     }
 
     func insertText(_ text: String) {
@@ -162,6 +173,55 @@ final class AnnotationController {
         let annotation = Annotation(tool: .text, points: [insertionPoint], style: currentStyle, text: text, fontSize: typingFontSize, fontName: typingFontName, rightAligned: typingRightAligned)
         annotations.append(annotation)
         textAnnotationIndex = annotations.indices.last
+    }
+
+    /// Whether an input method is currently composing text.
+    var hasMarkedText: Bool { !markedText.isEmpty }
+
+    /// The text of the annotation being typed, including any composition in
+    /// progress. This is the whole document as far as an input method is
+    /// concerned, and `markedText` is always its suffix.
+    var typingText: String {
+        guard let textAnnotationIndex, annotations.indices.contains(textAnnotationIndex),
+              annotations[textAnnotationIndex].tool == .text else { return "" }
+        return annotations[textAnnotationIndex].text
+    }
+
+    /// Replaces the in-progress composition with `text` (the IME's preedit).
+    func setMarkedText(_ text: String) {
+        clearMarkedText()
+        guard !text.isEmpty else { return }
+        insertText(text)
+        markedText = text
+    }
+
+    /// Commits `text` chosen by the input method, replacing the preedit.
+    func confirmMarkedText(_ text: String) {
+        clearMarkedText()
+        guard !text.isEmpty else { return }
+        insertText(text)
+    }
+
+    /// Ends composition by accepting what is on screen, which is what an input
+    /// method asks for when it finalizes with unmarkText: the preedit is
+    /// already in the annotation, so only the tracking is dropped.
+    func acceptMarkedText() {
+        markedText = ""
+    }
+
+    /// Drops the preedit without committing it, removing the text annotation
+    /// again if the composition was all it contained.
+    func clearMarkedText() {
+        let length = markedText.count
+        guard length > 0 else { return }
+        defer { markedText = "" }
+        guard let textAnnotationIndex, annotations.indices.contains(textAnnotationIndex),
+              annotations[textAnnotationIndex].tool == .text else { return }
+        annotations[textAnnotationIndex].text.removeLast(min(length, annotations[textAnnotationIndex].text.count))
+        if annotations[textAnnotationIndex].text.isEmpty {
+            annotations.remove(at: textAnnotationIndex)
+            self.textAnnotationIndex = nil
+        }
     }
 
     func deleteBackward() {
