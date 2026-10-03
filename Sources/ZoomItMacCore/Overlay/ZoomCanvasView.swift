@@ -132,6 +132,18 @@ final class ZoomCanvasView: NSView {
 
     override var isFlipped: Bool { true }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if Self.isSaveShortcut(keyCode: event.keyCode, modifierFlags: event.modifierFlags) {
+            saveViewport()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    static func isSaveShortcut(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        keyCode == 1 && modifierFlags.contains(.command)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
 
@@ -418,7 +430,7 @@ final class ZoomCanvasView: NSView {
         case 6 where event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control):
             // ⌘Z (macOS convention) or Ctrl+Z (matching Windows ZoomIt) undoes the last gesture.
             commandSink(.undo)
-        case 1 where event.modifierFlags.contains(.command):
+        case 1 where Self.isSaveShortcut(keyCode: event.keyCode, modifierFlags: event.modifierFlags):
             // ⌘S saves the whole zoomed viewport (matching ZoomIt's Ctrl+S).
             saveViewport()
         case 8 where event.modifierFlags.contains(.command):
